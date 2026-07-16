@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-get-pending-open-files"
+description = "Enables the get_pending_open_files command."
+commands.allow = ["get_pending_open_files"]

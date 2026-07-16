@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-sync-file-watches"
+description = "Enables syncing file watchers for external change detection."
+commands.allow = ["sync_file_watches"]

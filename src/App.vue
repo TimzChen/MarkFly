@@ -5,12 +5,25 @@
       <!-- 左侧文件树 -->
       <FileTree 
         :files="files"
-        :activeFile="currentFileName"
+        :activeFile="currentFilePath"
+        :collapsed="sidebarCollapsed"
         @selectFile="selectFile"
         @newFile="createNewFile"
         @openFolder="openFolder"
         @closeFile="closeFile"
+        @toggleCollapse="toggleSidebar"
       />
+
+      <button
+        v-if="sidebarCollapsed"
+        class="sidebar-expand-btn"
+        @click="toggleSidebar"
+        title="显示侧边栏 (视图菜单 Ctrl+B)"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <polyline points="9,6 15,12 9,18" stroke="currentColor" stroke-width="2"/>
+        </svg>
+      </button>
       
       <!-- 中央编辑区域 -->
       <div class="editor-container">
@@ -18,9 +31,9 @@
         <div class="file-tabs" v-if="files.length > 0">
           <div 
             v-for="file in files" 
-            :key="file.name"
+            :key="file.path"
             class="file-tab"
-            :class="{ active: file.name === currentFileName }"
+            :class="{ active: file.path === currentFilePath }"
             @click="selectFile(file)"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" class="tab-file-icon">
@@ -28,6 +41,11 @@
               <polyline points="14,2 14,8 20,8" stroke="currentColor" stroke-width="2"/>
             </svg>
             <span class="tab-name">{{ file.name }}</span>
+            <span
+              v-if="externalChangePaths.includes(file.path)"
+              class="tab-reload-dot"
+              title="文件已在磁盘上被修改"
+            />
             <button class="tab-close" @click.stop="closeFile(file)" v-if="files.length > 1" title="关闭文件">
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
                 <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2"/>
@@ -37,14 +55,15 @@
           </div>
         </div>
         
-        <div class="editor-content" v-if="currentFile">
+        <div class="editor-content" v-if="currentFile" @click.capture="handleToolbarLayoutClick">
           <Editor 
+            :key="editorLayout"
             :value="markdown" 
             :plugins="plugins"
             @change="handleChange"
             :locale="locale"
-            :mode="editorMode"
-            class="bytemd-editor-wrapper"
+            mode="split"
+            :class="['bytemd-editor-wrapper', `markfly-layout-${editorLayout}`]"
           />
         </div>
         
@@ -67,7 +86,8 @@
                 <li>使用 <kbd>Ctrl/Cmd + O</kbd> 打开文件</li>
                 <li>支持实时预览和语法高亮</li>
                 <li>内置数学公式和图表支持</li>
-                <li>点击左侧文件树选择文档或使用顶部工具栏开始</li>
+                <li>使用 <kbd>Ctrl/Cmd + B</kbd> 或视图菜单显示/隐藏侧边栏</li>
+                <li>点击左侧文件树或顶部标签栏切换文档</li>
               </ul>
             </div>
           </div>
@@ -118,7 +138,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { Editor } from '@bytemd/vue-next'
 import FileTree from './components/FileTree.vue'
 
@@ -134,25 +154,57 @@ import mermaid from '@bytemd/plugin-mermaid'
 import mediumZoom from '@bytemd/plugin-medium-zoom'
 
 // 导入 Tauri 相关模块
-import { open, save } from '@tauri-apps/plugin-dialog'
+import { open, save, ask } from '@tauri-apps/plugin-dialog'
 import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs'
-import { listen } from '@tauri-apps/api/event'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
 
 // 主题管理
 const themeStore = useThemeStore()
 
+const SIDEBAR_STORAGE_KEY = 'markfly-sidebar-collapsed'
+const EDITOR_MODE_STORAGE_KEY = 'markfly-editor-mode'
+
+type EditorLayoutMode = 'preview-only' | 'split' | 'tab'
+
+const loadEditorLayout = (): EditorLayoutMode => {
+  const stored = localStorage.getItem(EDITOR_MODE_STORAGE_KEY)
+  // 兼容旧版无效的 'preview' 值
+  if (stored === 'preview' || stored === 'preview-only') return 'preview-only'
+  if (stored === 'split' || stored === 'tab') return stored
+  return 'preview-only'
+}
+
 // 响应式数据
-const files = ref<FileItem[]>(sampleFiles)
-const currentFile = ref<FileItem | null>(sampleFiles.length > 0 ? sampleFiles[0] : null)
-const markdown = ref(currentFile.value?.content || '')
-const currentFileName = ref(currentFile.value?.name || '欢迎使用 MarkFly')
+const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_STORAGE_KEY) !== 'false')
+const files = ref<FileItem[]>([])
+const currentFile = ref<FileItem | null>(null)
+const markdown = ref('')
 const isModified = ref(false)
-const editorMode = ref<'split' | 'tab' | 'preview'>('split')
+const editorLayout = ref<EditorLayoutMode>(loadEditorLayout())
 const currentLine = ref(1)
 const currentColumn = ref(1)
 const showSettings = ref(false)
+const externalChangePaths = ref<string[]>([])
+const watchSuppressUntil = new Map<string, number>()
+let unlistenFileChanged: UnlistenFn | null = null
+let reloadPromptOpen = false
+
+const markExternalChange = (filePath: string) => {
+  if (!externalChangePaths.value.includes(filePath)) {
+    externalChangePaths.value = [...externalChangePaths.value, filePath]
+  }
+}
+
+const clearExternalChange = (filePath: string) => {
+  if (externalChangePaths.value.includes(filePath)) {
+    externalChangePaths.value = externalChangePaths.value.filter((path) => path !== filePath)
+  }
+}
 
 // 计算属性
+const currentFilePath = computed(() => currentFile.value?.path ?? '')
+
 const wordCount = computed(() => {
   return markdown.value.trim().split(/\s+/).filter((word: string) => word.length > 0).length
 })
@@ -166,29 +218,34 @@ const plugins = [
   mediumZoom()
 ]
 
-// 本地化配置
+// 本地化配置（ByteMD 使用顶层 locale 键）
 const locale = {
-  toolbar: {
-    bold: '粗体',
-    italic: '斜体',
-    quote: '引用',
-    link: '链接',
-    image: '图片',
-    code: '代码',
-    codeBlock: '代码块',
-    ul: '无序列表',
-    ol: '有序列表',
-    h1: '一级标题',
-    h2: '二级标题',
-    h3: '三级标题',
-    table: '表格',
-    hr: '分割线',
-    fullscreen: '全屏',
-    source: '源码模式',
-    preview: '预览模式',
-    write: '编辑模式',
-    toc: '目录'
-  }
+  bold: '粗体',
+  italic: '斜体',
+  quote: '引用',
+  link: '链接',
+  image: '图片',
+  code: '代码',
+  codeBlock: '代码块',
+  ul: '无序列表',
+  ol: '有序列表',
+  h1: '一级标题',
+  h2: '二级标题',
+  h3: '三级标题',
+  table: '表格',
+  hr: '分割线',
+  fullscreen: '全屏',
+  source: '源码模式',
+  write: 'Write',
+  preview: 'Preview',
+  writeOnly: '仅编辑',
+  previewOnly: '仅预览',
+  exitWriteOnly: '退出仅编辑',
+  exitPreviewOnly: '退出仅预览',
+  toc: '目录',
+  help: '帮助',
+  closeToc: '关闭目录',
+  closeHelp: '关闭帮助'
 }
 
 // 方法
@@ -205,7 +262,7 @@ const handleChange = (value: string) => {
   currentColumn.value = lines[lines.length - 1].length + 1
 }
 
-const selectFile = (file: FileItem) => {
+const selectFile = async (file: FileItem) => {
   // 保存当前文件的修改
   if (isModified.value && currentFile.value) {
     currentFile.value.content = markdown.value
@@ -214,8 +271,8 @@ const selectFile = (file: FileItem) => {
   // 切换到新文件
   currentFile.value = file
   markdown.value = file.content
-  currentFileName.value = file.name
   isModified.value = false
+  await checkPendingExternalChange(file)
 }
 
 const createNewFile = () => {
@@ -280,18 +337,19 @@ $$
 }
 
 const closeFile = (file: FileItem) => {
-  const index = files.value.findIndex(f => f.name === file.name)
+  const index = files.value.findIndex(f => f.path === file.path)
   if (index > -1) {
     files.value.splice(index, 1)
+    clearExternalChange(file.path)
+    watchSuppressUntil.delete(file.path)
     
     // 如果关闭的是当前文件，切换到其他文件
-    if (file.name === currentFileName.value) {
+    if (file.path === currentFilePath.value) {
       if (files.value.length > 0) {
         const nextFile = files.value[Math.max(0, index - 1)]
         selectFile(nextFile)
       } else {
         currentFile.value = null
-        currentFileName.value = ''
         markdown.value = ''
       }
     }
@@ -307,6 +365,36 @@ const openSettings = () => {
   showSettings.value = true
 }
 
+const toggleSidebar = () => {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed.value))
+}
+
+const togglePreview = () => {
+  const modes: EditorLayoutMode[] = ['preview-only', 'split', 'tab']
+  const currentIndex = modes.indexOf(editorLayout.value)
+  editorLayout.value = modes[(currentIndex + 1) % modes.length]
+  localStorage.setItem(EDITOR_MODE_STORAGE_KEY, editorLayout.value)
+}
+
+const handleToolbarLayoutClick = (event: MouseEvent) => {
+  const icon = (event.target as HTMLElement).closest('.bytemd-toolbar-right .bytemd-toolbar-icon')
+  if (!icon) return
+
+  const icons = icon.parentElement?.querySelectorAll('.bytemd-toolbar-icon')
+  if (!icons) return
+
+  const index = Array.from(icons).indexOf(icon)
+  // 右侧工具栏：目录、帮助、仅编辑、仅预览、全屏、源码
+  if (index === 2) {
+    editorLayout.value = 'tab'
+    localStorage.setItem(EDITOR_MODE_STORAGE_KEY, 'tab')
+  } else if (index === 3) {
+    editorLayout.value = 'preview-only'
+    localStorage.setItem(EDITOR_MODE_STORAGE_KEY, 'preview-only')
+  }
+}
+
 const getThemeTooltip = () => {
   const modeMap = {
     light: '切换到深色模式',
@@ -314,6 +402,164 @@ const getThemeTooltip = () => {
     auto: '切换到浅色模式'
   }
   return modeMap[themeStore.mode] || '切换主题'
+}
+
+const getFileNameFromPath = (filePath: string) =>
+  filePath.split(/[/\\]/).pop() || '未命名.md'
+
+const isDiskFilePath = (filePath: string) =>
+  /[/\\]/.test(filePath) || /^[A-Za-z]:/.test(filePath)
+
+const markFileSavedOnDisk = (filePath: string) => {
+  watchSuppressUntil.set(filePath, Date.now() + 1500)
+}
+
+const isWatchSuppressed = (filePath: string) => {
+  const until = watchSuppressUntil.get(filePath)
+  return until !== undefined && Date.now() < until
+}
+
+const syncDiskFileWatches = async () => {
+  const paths = files.value.map((file) => file.path).filter(isDiskFilePath)
+  try {
+    await invoke('sync_file_watches', { paths })
+  } catch (error) {
+    console.error('同步文件监听失败:', error)
+  }
+}
+
+const reloadFileFromDisk = async (file: FileItem, newContent?: string) => {
+  const content = newContent ?? await readTextFile(file.path)
+  file.content = content
+  clearExternalChange(file.path)
+
+  if (currentFile.value?.path === file.path) {
+    markdown.value = content
+    isModified.value = false
+  }
+}
+
+const promptReloadFile = async (file: FileItem, newContent: string) => {
+  if (reloadPromptOpen) {
+    markExternalChange(file.path)
+    return
+  }
+
+  reloadPromptOpen = true
+  try {
+    const message = isModified.value && currentFile.value?.path === file.path
+      ? `「${file.name}」已在磁盘上被其他程序修改。\n\n是否重新加载？未保存的更改将会丢失。`
+      : `「${file.name}」已在磁盘上被其他程序修改。\n\n是否重新加载？`
+
+    const reload = await ask(message, {
+      title: 'MarkFly',
+      kind: 'warning',
+      okLabel: '重新加载',
+      cancelLabel: '取消'
+    })
+
+    if (reload) {
+      await reloadFileFromDisk(file, newContent)
+    } else {
+      markExternalChange(file.path)
+    }
+  } finally {
+    reloadPromptOpen = false
+  }
+}
+
+const handleExternalFileChange = async (filePath: string) => {
+  if (isWatchSuppressed(filePath)) {
+    return
+  }
+
+  const file = files.value.find((item) => item.path === filePath)
+  if (!file) {
+    return
+  }
+
+  let newContent: string
+  try {
+    newContent = await readTextFile(filePath)
+  } catch (error) {
+    console.error('读取外部变更失败:', error)
+    return
+  }
+
+  if (newContent === file.content) {
+    return
+  }
+
+  if (currentFile.value?.path === filePath) {
+    await promptReloadFile(file, newContent)
+  } else {
+    markExternalChange(filePath)
+  }
+}
+
+const checkPendingExternalChange = async (file: FileItem) => {
+  if (!externalChangePaths.value.includes(file.path)) {
+    return
+  }
+
+  let newContent: string
+  try {
+    newContent = await readTextFile(file.path)
+  } catch (error) {
+    console.error('读取外部变更失败:', error)
+    return
+  }
+
+  if (newContent === file.content) {
+    clearExternalChange(file.path)
+    watchSuppressUntil.delete(file.path)
+    return
+  }
+
+  await promptReloadFile(file, newContent)
+}
+
+const loadWelcomeSample = () => {
+  if (files.value.length > 0) {
+    return
+  }
+
+  files.value = [...sampleFiles]
+  if (sampleFiles.length > 0) {
+    selectFile(sampleFiles[0])
+  }
+}
+
+const openFileFromPath = async (filePath: string) => {
+  try {
+    const existing = files.value.find((file) => file.path === filePath)
+    if (existing) {
+      selectFile(existing)
+      return
+    }
+
+    const content = await readTextFile(filePath)
+    const newFile: FileItem = {
+      name: getFileNameFromPath(filePath),
+      path: filePath,
+      content
+    }
+
+    files.value.push(newFile)
+    selectFile(newFile)
+  } catch (error) {
+    console.error('打开文件失败:', error)
+  }
+}
+
+const openFilePaths = async (paths: string[]) => {
+  if (paths.length === 0) {
+    return
+  }
+
+  for (const filePath of paths) {
+    await openFileFromPath(filePath)
+  }
 }
 
 // 新增：打开本地 Markdown 文件
@@ -328,20 +574,7 @@ const openLocalFile = async () => {
     })
     
     if (selected) {
-      // 读取文件内容
-      const content = await readTextFile(selected as string)
-      
-      // 创建文件对象
-      const fileName = (selected as string).split('/').pop() || (selected as string).split('\\').pop() || '未命名.md'
-      const newFile: FileItem = {
-        name: fileName,
-        path: selected as string,
-        content: content
-      }
-      
-      // 添加到文件列表并选中
-      files.value.push(newFile)
-      selectFile(newFile)
+      await openFileFromPath(selected as string)
     }
   } catch (error) {
     console.error('打开文件失败:', error)
@@ -355,7 +588,9 @@ const saveFileToLocal = async () => {
   try {
     // 如果文件已经有路径，直接保存
     if (currentFile.value.path && currentFile.value.path !== currentFile.value.name) {
+      markFileSavedOnDisk(currentFile.value.path)
       await writeTextFile(currentFile.value.path, markdown.value)
+      currentFile.value.content = markdown.value
       isModified.value = false
       console.log('文件已保存:', currentFile.value.path)
     } else {
@@ -368,11 +603,12 @@ const saveFileToLocal = async () => {
       })
       
       if (filePath) {
+        markFileSavedOnDisk(filePath)
         await writeTextFile(filePath, markdown.value)
+        currentFile.value.content = markdown.value
         // 更新文件路径
         currentFile.value.path = filePath
-        currentFile.value.name = filePath.split('/').pop() || filePath.split('\\').pop() || currentFile.value.name
-        currentFileName.value = currentFile.value.name
+        currentFile.value.name = getFileNameFromPath(filePath)
         isModified.value = false
         console.log('文件已保存到:', filePath)
       }
@@ -401,11 +637,12 @@ const saveFileAs = async () => {
     })
     
     if (filePath) {
+      markFileSavedOnDisk(filePath)
       await writeTextFile(filePath, markdown.value)
+      currentFile.value.content = markdown.value
       // 更新文件路径
       currentFile.value.path = filePath
-      currentFile.value.name = filePath.split('/').pop() || filePath.split('\\').pop() || currentFile.value.name
-      currentFileName.value = currentFile.value.name
+      currentFile.value.name = getFileNameFromPath(filePath)
       isModified.value = false
       console.log('文件已另存为:', filePath)
     }
@@ -416,6 +653,13 @@ const saveFileAs = async () => {
 
 // 新增：处理键盘快捷键
 const handleKeyDown = (event: KeyboardEvent) => {
+  // Ctrl/Cmd + B 显示/隐藏侧边栏（捕获阶段优先于编辑器粗体）
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'b' && !event.shiftKey && !event.altKey) {
+    event.preventDefault()
+    event.stopPropagation()
+    toggleSidebar()
+    return
+  }
   // Ctrl/Cmd + O 打开文件
   if ((event.ctrlKey || event.metaKey) && event.key === 'o') {
     event.preventDefault()
@@ -434,11 +678,15 @@ const handleKeyDown = (event: KeyboardEvent) => {
 }
 
 // 初始化主题
-onMounted(() => {
+onMounted(async () => {
   themeStore.initTheme()
   
-  // 添加键盘事件监听器
-  window.addEventListener('keydown', handleKeyDown)
+  // 添加键盘事件监听器（capture 确保 Ctrl+B 不被编辑器拦截）
+  window.addEventListener('keydown', handleKeyDown, true)
+
+  await listen<string[]>('open-file-path', async (event) => {
+    await openFilePaths(event.payload)
+  })
   
   // 监听菜单事件
   listen('menu', (event) => {
@@ -460,20 +708,50 @@ onMounted(() => {
         console.log('另存为');
         saveFileAs()
         break
+      case 'toggle-sidebar':
+        toggleSidebar()
+        break
+      case 'toggle-preview':
+        togglePreview()
+        break
+      case 'toggle-theme':
+        themeStore.toggleTheme()
+        break
       default:
         console.log('未知菜单事件:', event.payload);
     }
   }).then(() => {
-    // 菜单事件监听器已注册
     console.log('菜单事件监听器已注册');
   }).catch((error) => {
     console.error('注册菜单事件监听器失败:', error);
   });
+
+  unlistenFileChanged = await listen<string>('file-changed', async (event) => {
+    await handleExternalFileChange(event.payload)
+  })
+
+  const pendingFiles = await invoke<string[]>('get_pending_open_files')
+  if (pendingFiles.length > 0) {
+    await openFilePaths(pendingFiles)
+  } else if (files.value.length === 0) {
+    loadWelcomeSample()
+  }
+
+  await syncDiskFileWatches()
 })
+
+watch(
+  () => files.value.map((file) => file.path).join('\0'),
+  () => {
+    void syncDiskFileWatches()
+  }
+)
 
 // 清理事件监听器
 onUnmounted(() => {
-  window.removeEventListener('keydown', handleKeyDown)
+  window.removeEventListener('keydown', handleKeyDown, true)
+  unlistenFileChanged?.()
+  void invoke('sync_file_watches', { paths: [] })
 })
 </script>
 
@@ -554,6 +832,14 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+.tab-reload-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f59e0b;
+  flex-shrink: 0;
+}
+
 .tab-close {
   width: 16px;
   height: 16px;
@@ -589,8 +875,32 @@ onUnmounted(() => {
   flex: 1;
   display: flex;
   min-height: 0;
-  /* 添加滚动行为控制 */
   overflow: hidden;
+  position: relative;
+}
+
+.sidebar-expand-btn {
+  position: absolute;
+  left: 0;
+  top: 8px;
+  z-index: 20;
+  width: 20px;
+  height: 48px;
+  border: 1px solid var(--border-color);
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.sidebar-expand-btn:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
 }
 
 .editor-container {
@@ -612,6 +922,29 @@ onUnmounted(() => {
 .bytemd-editor-wrapper {
   height: 100%;
   width: 100%;
+}
+
+/* split 模式：隐藏 Write/Preview 文字标签，使用右侧图标 */
+.bytemd-editor-wrapper :deep(.bytemd-toolbar-tab) {
+  display: none !important;
+}
+
+.markfly-layout-preview-only :deep(.bytemd-editor) {
+  display: none !important;
+}
+
+.markfly-layout-preview-only :deep(.bytemd-preview) {
+  display: block !important;
+  width: 100% !important;
+}
+
+.markfly-layout-tab :deep(.bytemd-preview) {
+  display: none !important;
+}
+
+.markfly-layout-tab :deep(.bytemd-editor) {
+  display: block !important;
+  width: 100% !important;
 }
 
 .app-footer {

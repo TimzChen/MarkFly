@@ -9,8 +9,12 @@
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",
+    "dialog:allow-ask",
+    "dialog:allow-confirm",
     "fs:allow-read-text-file",
     "fs:allow-write-text-file",
-    "fs:allow-exists"
+    "fs:allow-exists",
+    "allow-get-pending-open-files",
+    "allow-sync-file-watches"
   ]
 }

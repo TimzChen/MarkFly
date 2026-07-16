@@ -1,6 +1,15 @@
 <template>
-  <div class="file-tree">
+  <div class="file-tree" :class="{ collapsed }" :aria-hidden="collapsed">
     <div class="file-tree-header">
+      <button
+        class="action-btn collapse-btn"
+        @click="$emit('toggleCollapse')"
+        title="隐藏侧边栏 (视图菜单 Ctrl+B)"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <polyline points="15,6 9,12 15,18" stroke="currentColor" stroke-width="2"/>
+        </svg>
+      </button>
       <div class="header-title">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
           <path d="M3 3h7l2 3h9v12H3V3z" stroke="currentColor" stroke-width="2" fill="none"/>
@@ -25,9 +34,9 @@
     <div class="file-list">
       <div 
         v-for="file in files" 
-        :key="file.name"
+        :key="file.path"
         class="file-item"
-        :class="{ active: file.name === activeFile }"
+        :class="{ active: file.path === activeFile }"
         @click="$emit('selectFile', file)"
       >
         <div class="file-icon">
@@ -49,30 +58,43 @@ interface FileItem {
   path: string
 }
 
-defineProps<{
+withDefaults(defineProps<{
   files: FileItem[]
   activeFile: string
-}>()
+  collapsed?: boolean
+}>(), {
+  collapsed: false
+})
 
 defineEmits<{
   selectFile: [file: FileItem]
   newFile: []
   openFolder: []
   closeFile: [file: FileItem]
+  toggleCollapse: []
 }>()
 </script>
 
 <style scoped>
 .file-tree {
   width: 280px;
+  min-width: 280px;
   background: var(--bg-secondary);
   color: var(--text-primary);
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--border-color);
-  transition: background-color 0.3s ease, color 0.3s ease;
-  /* 确保文件树容器本身不滚动，让内部列表滚动 */
+  transition: width 0.2s ease, min-width 0.2s ease, opacity 0.2s ease, border-color 0.2s ease;
   overflow: hidden;
+  flex-shrink: 0;
+}
+
+.file-tree.collapsed {
+  width: 0;
+  min-width: 0;
+  opacity: 0;
+  border-right-color: transparent;
+  pointer-events: none;
 }
 
 .file-tree-header {
@@ -86,9 +108,13 @@ defineEmits<{
   text-transform: uppercase;
   font-weight: 600;
   letter-spacing: 0.5px;
-  flex-shrink: 0; /* 防止头部被压缩 */
+  flex-shrink: 0;
   background: var(--bg-secondary);
   box-sizing: border-box;
+}
+
+.collapse-btn {
+  margin-right: 4px;
 }
 
 .header-title {
@@ -102,7 +128,7 @@ defineEmits<{
 .header-actions {
   display: flex;
   gap: 4px;
-  margin-left: auto; /* 推到右边 */
+  margin-left: auto;
   min-height: 35px;
   align-items: center;
 }
@@ -128,9 +154,8 @@ defineEmits<{
 .file-list {
   flex: 1;
   overflow-y: auto;
-  overscroll-behavior: contain; /* 防止滚动穿透 */
+  overscroll-behavior: contain;
   padding: 8px 0;
-  /* 确保滚动条样式一致 */
   scrollbar-width: thin;
   background: var(--bg-secondary);
 }
