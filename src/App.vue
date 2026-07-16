@@ -26,36 +26,47 @@
       </button>
       
       <!-- 中央编辑区域 -->
-      <div class="editor-container">
-        <!-- 文件标签栏 -->
-        <div class="file-tabs" v-if="files.length > 0">
-          <div 
-            v-for="file in files" 
-            :key="file.path"
-            class="file-tab"
-            :class="{ active: file.path === currentFilePath }"
-            @click="selectFile(file)"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" class="tab-file-icon">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" fill="none"/>
-              <polyline points="14,2 14,8 20,8" stroke="currentColor" stroke-width="2"/>
-            </svg>
-            <span class="tab-name">{{ file.name }}</span>
-            <span
-              v-if="externalChangePaths.includes(file.path)"
-              class="tab-reload-dot"
-              title="文件已在磁盘上被修改"
-            />
-            <button class="tab-close" @click.stop="closeFile(file)" v-if="files.length > 1" title="关闭文件">
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
-                <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2"/>
-                <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2"/>
+      <div class="editor-container" :class="{ 'has-unified-header': showUnifiedHeader }">
+        <div
+          v-if="files.length > 0"
+          class="editor-unified-header"
+          :class="{ 'is-merged': showUnifiedHeader }"
+          :style="showUnifiedHeader ? { '--tabs-width': `${tabsBarWidth}px` } : undefined"
+        >
+          <div class="file-tabs" ref="fileTabsRef">
+            <div 
+              v-for="file in files" 
+              :key="file.path"
+              class="file-tab"
+              :class="{ active: file.path === currentFilePath }"
+              @click="selectFile(file)"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" class="tab-file-icon">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" fill="none"/>
+                <polyline points="14,2 14,8 20,8" stroke="currentColor" stroke-width="2"/>
               </svg>
-            </button>
+              <span class="tab-name">{{ file.name }}</span>
+              <span
+                v-if="externalChangePaths.includes(file.path)"
+                class="tab-reload-dot"
+                title="文件已在磁盘上被修改"
+              />
+              <button class="tab-close" @click.stop="closeFile(file)" v-if="files.length > 1" title="关闭文件">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
+                  <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2"/>
+                  <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2"/>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
         
-        <div class="editor-content" v-if="currentFile" @click.capture="handleToolbarLayoutClick">
+        <div
+          class="editor-content"
+          v-if="currentFile"
+          :class="{ 'with-unified-header': showUnifiedHeader }"
+          @click.capture="handleToolbarLayoutClick"
+        >
           <Editor 
             :key="editorLayout"
             :value="markdown" 
@@ -97,7 +108,7 @@
 
     </div>
 
-    <!-- 状态栏 -->
+    <!-- 状态栏（合并 ByteMD 内置状态，避免双行重复） -->
     <div class="app-footer">
       <div class="footer-left">
         <button class="settings-btn" @click="openSettings" title="设置">
@@ -107,11 +118,14 @@
           </svg>
         </button>
         <span class="status-item">Ln {{ currentLine }}, Col {{ currentColumn }}</span>
-        <span class="status-item">{{ wordCount }} words</span>
-        <span class="status-item">{{ markdown.length }} characters</span>
+        <span class="status-sep">·</span>
+        <span class="status-item">{{ lineCount }} 行</span>
+        <span class="status-item">{{ wordCount }} 词</span>
+        <span class="status-item">{{ markdown.length }} 字符</span>
       </div>
       <div class="footer-right">
         <span class="status-item">Markdown</span>
+        <span class="status-sep">·</span>
         <span class="status-item">UTF-8</span>
         <button class="theme-toggle-btn" @click="themeStore.toggleTheme" :title="getThemeTooltip()">
           <svg v-if="themeStore.currentTheme === 'light'" width="12" height="12" viewBox="0 0 24 24" fill="none">
@@ -138,7 +152,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { Editor } from '@bytemd/vue-next'
 import FileTree from './components/FileTree.vue'
 
@@ -185,6 +199,9 @@ const editorLayout = ref<EditorLayoutMode>(loadEditorLayout())
 const currentLine = ref(1)
 const currentColumn = ref(1)
 const showSettings = ref(false)
+const fileTabsRef = ref<HTMLElement | null>(null)
+const tabsBarWidth = ref(160)
+let tabsResizeObserver: ResizeObserver | null = null
 const externalChangePaths = ref<string[]>([])
 const watchSuppressUntil = new Map<string, number>()
 let unlistenFileChanged: UnlistenFn | null = null
@@ -204,9 +221,31 @@ const clearExternalChange = (filePath: string) => {
 
 // 计算属性
 const currentFilePath = computed(() => currentFile.value?.path ?? '')
+const showUnifiedHeader = computed(() => files.value.length > 0 && !!currentFile.value)
+
+const updateTabsBarWidth = () => {
+  if (fileTabsRef.value) {
+    tabsBarWidth.value = Math.ceil(fileTabsRef.value.getBoundingClientRect().width)
+  }
+}
+
+const setupTabsResizeObserver = () => {
+  tabsResizeObserver?.disconnect()
+  nextTick(() => {
+    if (!fileTabsRef.value) return
+    tabsResizeObserver = new ResizeObserver(updateTabsBarWidth)
+    tabsResizeObserver.observe(fileTabsRef.value)
+    updateTabsBarWidth()
+  })
+}
 
 const wordCount = computed(() => {
   return markdown.value.trim().split(/\s+/).filter((word: string) => word.length > 0).length
+})
+
+const lineCount = computed(() => {
+  if (!markdown.value) return 0
+  return markdown.value.split('\n').length
 })
 
 // ByteMD 插件配置
@@ -738,6 +777,7 @@ onMounted(async () => {
   }
 
   await syncDiskFileWatches()
+  setupTabsResizeObserver()
 })
 
 watch(
@@ -747,10 +787,19 @@ watch(
   }
 )
 
+watch(showUnifiedHeader, () => {
+  setupTabsResizeObserver()
+})
+
+watch(editorLayout, () => {
+  nextTick(updateTabsBarWidth)
+})
+
 // 清理事件监听器
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown, true)
   unlistenFileChanged?.()
+  tabsResizeObserver?.disconnect()
   void invoke('sync_file_watches', { paths: [] })
 })
 </script>
@@ -911,11 +960,51 @@ onUnmounted(() => {
   background: var(--bg-primary);
 }
 
+.editor-unified-header.is-merged {
+  height: 35px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 20;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  overflow: visible;
+}
+
+.editor-unified-header.is-merged .file-tabs {
+  max-width: 48%;
+  height: 100%;
+  border-bottom: none;
+  background: transparent;
+  padding-right: 4px;
+}
+
 .editor-content {
   flex: 1;
   min-height: 0;
-  /* 确保编辑器容器可以正确处理滚动 */
   overflow: hidden;
+}
+
+.editor-content.with-unified-header {
+  position: relative;
+}
+
+.editor-content.with-unified-header :deep(.bytemd-toolbar) {
+  position: absolute;
+  top: -35px;
+  left: var(--tabs-width, 160px);
+  right: 0;
+  height: 35px !important;
+  min-height: 35px !important;
+  border-bottom: none !important;
+  background: var(--bg-secondary) !important;
+  z-index: 15;
+  padding: 0 8px !important;
+  box-sizing: border-box;
+}
+
+.editor-content.with-unified-header :deep(.bytemd-toolbar-left),
+.editor-content.with-unified-header :deep(.bytemd-toolbar-right) {
+  flex-wrap: nowrap;
 }
 
 /* 添加编辑器包装器样式 */
@@ -926,6 +1015,11 @@ onUnmounted(() => {
 
 /* split 模式：隐藏 Write/Preview 文字标签，使用右侧图标 */
 .bytemd-editor-wrapper :deep(.bytemd-toolbar-tab) {
+  display: none !important;
+}
+
+/* 隐藏 ByteMD 内置状态栏，统一使用应用底部状态栏 */
+.bytemd-editor-wrapper :deep(.bytemd-status) {
   display: none !important;
 }
 
@@ -948,26 +1042,33 @@ onUnmounted(() => {
 }
 
 .app-footer {
-  height: 22px;
+  height: 24px;
   background: var(--accent-color);
   color: var(--bg-primary);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 12px;
-  font-size: 12px;
+  padding: 0 10px;
+  font-size: 11px;
+  flex-shrink: 0;
 }
 
 .footer-left,
 .footer-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  min-width: 0;
 }
 
 .status-item {
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 11px;
+}
+
+.status-sep {
+  opacity: 0.55;
+  user-select: none;
 }
 
 .settings-btn,
