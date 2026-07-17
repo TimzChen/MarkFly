@@ -288,7 +288,7 @@ fn focus_main_window(app: &tauri::AppHandle) {
 fn get_app_info() -> serde_json::Value {
     serde_json::json!({
         "name": "MarkFly",
-        "version": "0.1.1",
+        "version": "0.1.2",
         "description": "跨平台 Markdown 编辑器"
     })
 }

@@ -8,26 +8,33 @@
 
 ## 📦 最新版本发布
 
-### MarkFly v0.1.1 (2026-07-17)
+### MarkFly v0.1.2 (2026-07-17)
 
-[v0.1.1 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.1) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
+[v0.1.2 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.2) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
 
 #### 下载安装包
 
 - **Windows**
-  - [MarkFly_0.1.1_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.1/MarkFly_0.1.1_x64-setup.exe) (4.28 MB)
+  - [MarkFly_0.1.2_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.2/MarkFly_0.1.2_x64-setup.exe) (4.34 MB)
 
 > macOS / Linux 安装包可通过 [GitHub Actions 手动发版](https://github.com/TimzChen/MarkFly/actions/workflows/manual-release.yml) 构建，或参考下方「构建应用」在本地打包。
 
-#### v0.1.1 更新内容
+#### v0.1.2 更新内容
 
-- **启动加速**：Boot 预览层先行渲染，Vue / ByteMD 编辑器懒加载
-- **文件打开加速**：Shell 传入文件预读，打开大文件更快看到内容
-- **预览增强**：GFM 表格管道预加载，复杂 Markdown 预览更稳定
-- **界面优化**：顶栏自适应布局、标签栏交互体验改进
-- **表格样式**：GFM 表格预览样式优化
+- **预览目录**：预览模式支持目录侧栏，快速跳转标题
+- **工具栏图标**：分屏 / 编辑 / 预览按钮与 ByteMD 图标统一
+- **本地图片**：相对路径图片通过 asset 协议正确加载
+- **大图查看**：点击图片可滚轮缩放、拖动平移查看
 
 #### 历史版本
+
+<details>
+<summary>MarkFly v0.1.1 (2026-07-17)</summary>
+
+- **Windows**: [MarkFly_0.1.1_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.1/MarkFly_0.1.1_x64-setup.exe) (4.28 MB)
+- Boot 预览层、启动加速、GFM 表格预加载、顶栏自适应布局等
+
+</details>
 
 <details>
 <summary>MarkFly v0.1.0 (2026-07-17)</summary>
@@ -180,7 +187,7 @@ Windows 本地发版（NSIS 安装包）：
 
 ```powershell
 .\scripts\build-release.ps1
-# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.1_x64-setup.exe
+# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.2_x64-setup.exe
 ```
 
 ## 📖 使用指南

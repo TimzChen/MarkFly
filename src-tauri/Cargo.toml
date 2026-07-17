@@ -1,6 +1,6 @@
 [package]
 name = "markfly"
-version = "0.1.1"
+version = "0.1.2"
 description = "MarkFly - 跨平台 Markdown 编辑器"
 authors = ["MarkFly Team"]
 edition = "2021"
