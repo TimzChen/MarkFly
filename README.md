@@ -8,36 +8,37 @@
 
 ## 📦 最新版本发布
 
-### MarkFly v0.0.1 (2025-09-03)
+### MarkFly v0.1.0 (2026-07-17)
 
-我们很高兴地宣布 MarkFly 的第一个正式版本 v0.0.1 已经发布！这个版本包含了基础的 Markdown 编辑功能和跨平台支持。
+[v0.1.0 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.0) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
 
 #### 下载安装包
 
-适用于不同操作系统的安装包已准备就绪：
+- **Windows**
+  - [MarkFly_0.1.0_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.0/MarkFly_0.1.0_x64-setup.exe) (4.26 MB)
 
-- **Windows**: 
-  - [MarkFly_0.0.1_x64-setup.exe](https://github.com/jwangkun/MarkFly/releases/download/v0.0.1/MarkFly_0.0.1_x64-setup.exe) (4.25 MB)
-  - [MarkFly_0.0.1_x64_en-US.msi](https://github.com/jwangkun/MarkFly/releases/download/v0.0.1/MarkFly_0.0.1_x64_en-US.msi) (5.34 MB)
-- **macOS**: 
-  - [MarkFly_0.0.1_x64.dmg](https://github.com/jwangkun/MarkFly/releases/download/v0.0.1/MarkFly_0.0.1_x64.dmg) (5.65 MB)
-  - [MarkFly_0.0.1_aarch64.dmg](https://github.com/jwangkun/MarkFly/releases/download/v0.0.1/MarkFly_0.0.1_aarch64.dmg) (5.57 MB)
-- **Linux**: 
-  - [MarkFly_0.0.1_amd64.AppImage](https://github.com/jwangkun/MarkFly/releases/download/v0.0.1/MarkFly_0.0.1_amd64.AppImage) (78.4 MB)
-  - [MarkFly_0.0.1_amd64.deb](https://github.com/jwangkun/MarkFly/releases/download/v0.0.1/MarkFly_0.0.1_amd64.deb) (5.38 MB)
-  - [MarkFly-0.0.1-1.x86_64.rpm](https://github.com/jwangkun/MarkFly/releases/download/v0.0.1/MarkFly-0.0.1-1.x86_64.rpm) (5.38 MB)
+> macOS / Linux 安装包可通过 [GitHub Actions 手动发版](https://github.com/TimzChen/MarkFly/actions/workflows/manual-release.yml) 构建，或参考下方「构建应用」在本地打包。
 
-#### 版本特性
+#### v0.1.0 更新内容
 
-- 基础 Markdown 编辑功能
-- 实时预览模式
-- 代码语法高亮
-- 数学公式支持
-- Mermaid 图表渲染
-- 图片缩放功能
-- 文件管理（新建、打开、保存、另存为）
-- 主题切换（亮色/暗色）
-- 跨平台支持（Windows、macOS、Linux）
+- VS Code 风格界面：标签栏、状态栏、文件列表选中态主题优化
+- 可拖动侧边栏切换按钮，支持位置记忆
+- 编辑器顶栏与 ByteMD 工具栏合并，支持折叠
+- 多种预览布局：分屏 / 仅预览 / 标签切换
+- Shell 双击 `.md` 文件直接打开 MarkFly
+- 外部修改文件变更检测与重新加载提示
+- Windows 发布构建脚本 (`scripts/build-release.ps1`)
+
+#### 历史版本
+
+<details>
+<summary>MarkFly v0.0.1 (2025-09-03)</summary>
+
+- **Windows**: [setup.exe](https://github.com/jwangkun/MarkFly/releases/download/v0.0.1/MarkFly_0.0.1_x64-setup.exe) · [msi](https://github.com/jwangkun/MarkFly/releases/download/v0.0.1/MarkFly_0.0.1_x64_en-US.msi)
+- **macOS**: [x64.dmg](https://github.com/jwangkun/MarkFly/releases/download/v0.0.1/MarkFly_0.0.1_x64.dmg) · [aarch64.dmg](https://github.com/jwangkun/MarkFly/releases/download/v0.0.1/MarkFly_0.0.1_aarch64.dmg)
+- **Linux**: [AppImage](https://github.com/jwangkun/MarkFly/releases/download/v0.0.1/MarkFly_0.0.1_amd64.AppImage) · [deb](https://github.com/jwangkun/MarkFly/releases/download/v0.0.1/MarkFly_0.0.1_amd64.deb) · [rpm](https://github.com/jwangkun/MarkFly/releases/download/v0.0.1/MarkFly-0.0.1-1.x86_64.rpm)
+
+</details>
 
 ## 🎯 项目愿景
 
@@ -101,14 +102,17 @@ MarkFly 的目标是成为一款轻量级、高性能且功能丰富的 Markdown
 
 - 🚀 **极致性能**: 基于 Rust + Tauri，启动快速，内存占用极低
 - 🖥️ **跨平台支持**: 完美支持 Windows、macOS、Linux 三大操作系统
-- 📝 **实时预览**: 分屏实时预览，所见即所得的写作体验
+- 📝 **实时预览**: 分屏 / 仅预览 / 标签切换，多种布局随心选
+- 🗂️ **文件管理**: 侧边栏文件树、多标签页、打开文件夹、Shell 关联打开
+- 🔔 **外部变更检测**: 文件被其他程序修改时提示重新加载
+- 🎨 **VS Code 风格界面**: 标签栏、状态栏、列表选中态主题统一
 - 🎨 **语法高亮**: 支持 180+ 编程语言的代码高亮显示
 - 📊 **图表支持**: 内置 Mermaid 流程图、时序图等图表渲染
 - 🧮 **数学公式**: 完整的 LaTeX 数学公式支持
 - 📋 **GFM 扩展**: 完整支持 GitHub Flavored Markdown 规范
 - 🔍 **图片缩放**: 点击图片即可放大查看细节
-- 💾 **文件管理**: 支持新建、打开、保存 Markdown 文件
-- 🌙 **主题切换**: 支持亮色和暗色两种主题模式
+- 💾 **文件管理**: 支持新建、打开、保存、另存为 Markdown 文件
+- 🌙 **主题切换**: 支持浅色 / 深色 / 跟随系统三种模式
 - 🎯 **专注写作**: 简洁直观的界面设计，让你专注于内容创作
 
 ## 🔒 安全与隐私
@@ -133,7 +137,6 @@ MarkFly 非常重视用户的数据安全和隐私保护：
   - `@bytemd/plugin-math` - 数学公式支持
   - `@bytemd/plugin-mermaid` - Mermaid 图表
   - `@bytemd/plugin-medium-zoom` - 图片缩放
-  - `@bytemd/plugin-frontmatter` - Front Matter 支持
 
 ## 🚀 快速开始
 
@@ -162,19 +165,30 @@ npm run tauri:dev
 
 ### 构建应用
 
-```
-# 构建生产版本
+```bash
+# 构建全部平台安装包
 npm run tauri:build
+```
+
+Windows 本地发版（NSIS 安装包）：
+
+```powershell
+.\scripts\build-release.ps1
+# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.0_x64-setup.exe
 ```
 
 ## 📖 使用指南
 
 ### 快捷键
 
-- `Ctrl/Cmd + N` - 新建文件
-- `Ctrl/Cmd + O` - 打开文件
-- `Ctrl/Cmd + S` - 保存文件
-- `Ctrl/Cmd + Shift + P` - 切换预览模式
+| 快捷键 | 功能 |
+|--------|------|
+| `Ctrl/Cmd + N` | 新建文件 |
+| `Ctrl/Cmd + O` | 打开文件 |
+| `Ctrl/Cmd + S` | 保存文件 |
+| `Ctrl/Cmd + B` | 显示 / 隐藏侧边栏 |
+
+预览模式切换、主题切换等可通过**视图菜单**或编辑器工具栏操作。
 
 ### 支持的文件格式
 
@@ -198,6 +212,8 @@ MarkFly/
 │   ├── icons/              # 应用图标
 │   ├── Cargo.toml          # Rust 依赖配置
 │   └── tauri.conf.json     # Tauri 配置
+├── scripts/                # 构建脚本
+│   └── build-release.ps1   # Windows 发版打包
 ├── package.json            # Node.js 依赖配置
 ├── vite.config.ts          # Vite 构建配置
 └── README.md               # 项目说明
@@ -226,9 +242,9 @@ MarkFly/
 
 ## 📞 联系我们
 
-- 项目主页: [GitHub](https://github.com/jwangkun/MarkFly.git)
-- 问题反馈: [Issues](https://github.com/jwangkun/MarkFly.git/issues)
-- 功能建议: [Discussions](https://github.com/jwangkun/MarkFly.git/discussions)
+- 项目主页: [GitHub](https://github.com/TimzChen/MarkFly)
+- 问题反馈: [Issues](https://github.com/TimzChen/MarkFly/issues)
+- 上游仓库: [jwangkun/MarkFly](https://github.com/jwangkun/MarkFly)
 
 ---
 
