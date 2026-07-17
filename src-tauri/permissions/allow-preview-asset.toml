@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-preview-asset"
+description = "Allows preview asset files to be loaded via the asset protocol."
+commands.allow = ["allow_preview_asset"]

@@ -83,6 +83,15 @@
                 <button
                   type="button"
                   class="layout-mode-btn"
+                  :class="{ 'is-active': previewTocVisible }"
+                  :title="previewTocVisible ? '关闭目录' : '目录'"
+                  @click.stop="togglePreviewToc"
+                >
+                  <span class="layout-mode-icon" v-html="toolbarIcons.toc" />
+                </button>
+                <button
+                  type="button"
+                  class="layout-mode-btn"
                   title="分屏"
                   @click.stop="setEditorLayout('split')"
                 >
@@ -97,17 +106,10 @@
                   title="仅编辑"
                   @click.stop="setEditorLayout('tab')"
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                    <rect x="4" y="4" width="16" height="16" stroke="currentColor" stroke-width="2"/>
-                    <line x1="7" y1="8" x2="17" y2="8" stroke="currentColor" stroke-width="2"/>
-                    <line x1="7" y1="12" x2="14" y2="12" stroke="currentColor" stroke-width="2"/>
-                  </svg>
+                  <span class="layout-mode-icon" v-html="toolbarIcons.leftExpand" />
                 </button>
                 <button type="button" class="layout-mode-btn is-active" title="仅预览" disabled>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                    <rect x="4" y="4" width="16" height="16" stroke="currentColor" stroke-width="2"/>
-                    <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
-                  </svg>
+                  <span class="layout-mode-icon" v-html="toolbarIcons.rightExpand" />
                 </button>
               </div>
             </div>
@@ -133,12 +135,19 @@
             ref="editorContentRef"
             :class="{ 'is-background': !currentFile }"
           >
-            <div
-              v-if="usePreviewViewer"
-              ref="previewBodyRef"
-              class="markfly-preview-viewer markdown-body"
-              v-html="previewHtml"
-            />
+            <div v-if="usePreviewViewer" class="preview-viewer-shell">
+              <div
+                ref="previewBodyRef"
+                class="markfly-preview-viewer markdown-body"
+                v-html="previewHtml"
+              />
+              <TableOfContents
+                v-if="previewTocVisible"
+                :content="previewSource"
+                :scroll-root="previewBodyRef"
+                @close="previewTocVisible = false"
+              />
+            </div>
             <component
               v-if="!usePreviewViewer && EditorComponent"
               :is="EditorComponent"
@@ -227,11 +236,19 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, shallowRef, defineAsyncComponent, type Component } from 'vue'
 const FileTree = defineAsyncComponent(() => import('./components/FileTree.vue'))
 const SettingsPanel = defineAsyncComponent(() => import('./components/SettingsPanel.vue'))
+const TableOfContents = defineAsyncComponent(() => import('./components/TableOfContents.vue'))
 import type { FileItem } from './data/sampleFiles'
 import { useThemeStore } from './stores/theme'
 import { lightMarkdownToHtml } from './utils/lightMarkdown'
 import { needsFullPreview, stripFrontmatter } from './utils/markdownPreview'
 import { consumeMediumPreviewPreload, startMediumPreviewPreload } from './utils/previewEngine'
+import {
+  allowMarkdownAssets,
+  fixPreviewImages,
+  rewritePreviewAssetUrls,
+} from './utils/previewAssets'
+import { bindPreviewImageZoom, unbindPreviewImageZoom } from './utils/previewImageZoom'
+import { toolbarIcons } from './utils/toolbarIcons'
 import {
   tauriInvoke,
   tauriListen,
@@ -294,6 +311,7 @@ const themeStore = useThemeStore()
 const SIDEBAR_STORAGE_KEY = 'markfly-sidebar-collapsed'
 const SIDEBAR_BTN_TOP_KEY = 'markfly-sidebar-btn-top'
 const TOOLBAR_STORAGE_KEY = 'markfly-toolbar-collapsed'
+const PREVIEW_TOC_STORAGE_KEY = 'markfly-preview-toc-visible'
 const EDITOR_MODE_STORAGE_KEY = 'markfly-editor-mode'
 const SIDEBAR_WIDTH = 280
 const SIDEBAR_BTN_HEIGHT = 48
@@ -333,6 +351,7 @@ let sidebarBtnDragStartY = 0
 let sidebarBtnDragStartTop = 0
 let sidebarBtnDidDrag = false
 const toolbarCollapsed = ref(localStorage.getItem(TOOLBAR_STORAGE_KEY) === 'true')
+const previewTocVisible = ref(localStorage.getItem(PREVIEW_TOC_STORAGE_KEY) === 'true')
 const files = ref<FileItem[]>([])
 const currentFile = ref<FileItem | null>(null)
 const markdown = ref('')
@@ -431,7 +450,7 @@ const lineCount = computed(() => {
   return markdown.value.split('\n').length
 })
 
-// ByteMD 插件：首屏为空，gfm/highlight/mediumZoom/math/mermaid 均懒加载
+// ByteMD 插件：首屏为空，gfm/highlight/math/mermaid 均懒加载
 const plugins = ref<BytemdPlugin[]>([])
 const previewEngineReady = ref(false)
 let mediumPluginsLoaded = false
@@ -476,13 +495,12 @@ const loadMediumPlugins = async () => {
 
     if (!mediumPluginsLoaded && plugins.value.length === 0) {
       await ensureFullPreviewProcessor()
-      const [{ default: gfm }, { default: highlight }, { default: mediumZoom }] = await Promise.all([
+      const [{ default: gfm }, { default: highlight }] = await Promise.all([
         import('@bytemd/plugin-gfm'),
         import('@bytemd/plugin-highlight'),
-        import('@bytemd/plugin-medium-zoom'),
         import('highlight.js/styles/vs.css'),
       ])
-      plugins.value = [gfm(), highlight(), mediumZoom()]
+      plugins.value = [gfm(), highlight()]
     }
 
     mediumPluginsLoaded = true
@@ -562,14 +580,17 @@ const normalizePreviewHtml = (html: string): string =>
 
 const previewHtml = computed(() => {
   const source = previewSource.value
+  const filePath = currentFilePath.value
+  let html = ''
   if (previewEngineReady.value && bytemdGetProcessor && plugins.value.length > 0) {
-    const html = bytemdGetProcessor({ plugins: plugins.value }).processSync(source).toString()
-    return normalizePreviewHtml(html)
-  }
-  if (needsFullPreview(markdown.value)) {
+    html = bytemdGetProcessor({ plugins: plugins.value }).processSync(source).toString()
+    html = normalizePreviewHtml(html)
+  } else if (needsFullPreview(markdown.value)) {
     return '<p class="preview-loading-hint">正在加载完整预览…</p>'
+  } else {
+    html = lightMarkdownToHtml(source)
   }
-  return lightMarkdownToHtml(source)
+  return rewritePreviewAssetUrls(html, filePath)
 })
 
 const applyPreviewViewerEffects = () => {
@@ -577,7 +598,12 @@ const applyPreviewViewerEffects = () => {
   previewViewerEffectCleanups = []
 
   const body = previewBodyRef.value
-  if (!body || !previewEngineReady.value || !bytemdGetProcessor) return
+  if (!body || !previewEngineReady.value || !bytemdGetProcessor) {
+    if (body) bindPreviewImageZoom(body)
+    return
+  }
+
+  fixPreviewImages(body, currentFilePath.value)
 
   const file = bytemdGetProcessor({ plugins: plugins.value }).processSync(previewSource.value)
   for (const plugin of plugins.value) {
@@ -586,6 +612,23 @@ const applyPreviewViewerEffects = () => {
       previewViewerEffectCleanups.push(cleanup)
     }
   }
+
+  bindPreviewImageZoom(body)
+}
+
+const syncPreviewAssets = async () => {
+  const filePath = currentFilePath.value
+  if (!filePath) return
+  await allowMarkdownAssets(filePath, markdown.value)
+  nextTick(() => {
+    fixPreviewImages(previewBodyRef.value, filePath)
+    const byteMdPreview = editorContentRef.value?.querySelector(
+      '.bytemd-preview .markdown-body'
+    ) as HTMLElement | null
+    fixPreviewImages(byteMdPreview, filePath)
+    bindPreviewImageZoom(previewBodyRef.value)
+    bindPreviewImageZoom(byteMdPreview)
+  })
 }
 
 // 本地化配置（ByteMD 使用顶层 locale 键）
@@ -648,6 +691,7 @@ const selectFile = async (file: FileItem) => {
     await loadMediumPlugins()
   }
   await ensurePreviewPipeline()
+  void syncPreviewAssets()
 }
 
 const createNewFile = () => {
@@ -789,6 +833,11 @@ const clampSidebarBtnPosition = () => {
 const toggleToolbar = () => {
   toolbarCollapsed.value = !toolbarCollapsed.value
   localStorage.setItem(TOOLBAR_STORAGE_KEY, String(toolbarCollapsed.value))
+}
+
+const togglePreviewToc = () => {
+  previewTocVisible.value = !previewTocVisible.value
+  localStorage.setItem(PREVIEW_TOC_STORAGE_KEY, String(previewTocVisible.value))
 }
 
 const togglePreview = () => {
@@ -1161,6 +1210,7 @@ onMounted(async () => {
     try {
       if (currentFile.value) {
         await ensurePreviewPipeline()
+        await syncPreviewAssets()
       }
     } catch (error) {
       console.error('预览管道加载失败:', error)
@@ -1265,9 +1315,15 @@ watch(markdown, (content) => {
   }
 })
 
-watch([previewHtml, plugins, usePreviewViewer], () => {
+watch([previewHtml, plugins, usePreviewViewer, currentFilePath], () => {
   if (!usePreviewViewer.value) return
+  void syncPreviewAssets()
   nextTick(() => applyPreviewViewerEffects())
+})
+
+watch([markdown, editorLayout, currentFilePath], () => {
+  if (usePreviewViewer.value) return
+  void syncPreviewAssets()
 })
 
 // 清理事件监听器
@@ -1276,6 +1332,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', clampSidebarBtnPosition)
   unlistenFileChanged?.()
   toolbarObserver?.disconnect()
+  unbindPreviewImageZoom(previewBodyRef.value)
   previewViewerEffectCleanups.forEach((cleanup) => cleanup())
   void tauriInvoke('sync_file_watches', { paths: [] })
 })
@@ -1576,6 +1633,8 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .editor-content.is-background {
@@ -1598,11 +1657,22 @@ onUnmounted(() => {
 }
 
 .markfly-preview-viewer {
+  flex: 1;
+  min-width: 0;
   height: 100%;
   overflow: auto;
   padding: 16px 24px;
   box-sizing: border-box;
   background: var(--editor-bg);
+}
+
+.preview-viewer-shell {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .preview-layout-toolbar {
@@ -1626,6 +1696,12 @@ onUnmounted(() => {
   cursor: pointer;
   flex-shrink: 0;
   transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.layout-mode-icon :deep(svg) {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .layout-mode-btn:hover:not(:disabled) {

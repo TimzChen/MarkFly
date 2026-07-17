@@ -444,6 +444,66 @@ html, body {
   color: var(--accent-color);
 }
 
+.bytemd-preview .markdown-body img:not(a img),
+.markfly-preview-viewer.markdown-body img:not(a img) {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  display: block;
+  margin: 12px 0;
+  border-radius: 6px;
+  cursor: zoom-in;
+  box-sizing: content-box;
+}
+
+.markfly-image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.88);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.markfly-image-lightbox.is-visible {
+  opacity: 1;
+}
+
+.markfly-image-lightbox-stage {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.markfly-image-lightbox-image {
+  max-width: none;
+  max-height: none;
+  user-select: none;
+  cursor: grab;
+  transform-origin: center center;
+  will-change: transform;
+}
+
+.markfly-image-lightbox-image.is-dragging {
+  cursor: grabbing;
+}
+
+.markfly-image-lightbox-hint {
+  flex-shrink: 0;
+  padding: 10px 0 18px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.72);
+  user-select: none;
+}
+
 .preview-loading-hint {
   color: var(--text-secondary);
   padding: 16px 0;

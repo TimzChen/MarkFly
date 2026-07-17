@@ -14,18 +14,16 @@ declare global {
 
 const loadMediumModules = (): Promise<MediumPreviewModules> => {
   return (async () => {
-    const [bytemd, { default: gfm }, { default: highlight }, { default: mediumZoom }] =
-      await Promise.all([
+    const [bytemd, { default: gfm }, { default: highlight }] = await Promise.all([
         import('bytemd'),
         import('@bytemd/plugin-gfm'),
         import('@bytemd/plugin-highlight'),
-        import('@bytemd/plugin-medium-zoom'),
         import('highlight.js/styles/vs.css'),
       ])
 
     return {
       getProcessor: bytemd.getProcessor,
-      createPlugins: () => [gfm(), highlight(), mediumZoom()],
+      createPlugins: () => [gfm(), highlight()],
     }
   })()
 }

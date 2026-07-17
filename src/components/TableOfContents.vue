@@ -1,70 +1,78 @@
 <template>
-  <div class="toc-panel">
+  <aside class="toc-panel">
     <div class="toc-header">
       <div class="header-title">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-          <path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2"/>
-        </svg>
-        <span>Table of Contents</span>
+        <span class="header-icon" v-html="toolbarIcons.toc" />
+        <span>目录</span>
       </div>
+      <button type="button" class="toc-close-btn" title="关闭目录" @click="emit('close')">
+        <svg width="12" height="12" viewBox="0 0 48 48" fill="none">
+          <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="4" d="m8 8 32 32M8 40 40 8"/>
+        </svg>
+      </button>
     </div>
-    
+
     <div class="toc-content">
-      <div 
-        v-for="heading in headings" 
-        :key="heading.id"
+      <div v-if="headings.length === 0" class="toc-empty">暂无标题</div>
+      <button
+        v-for="(heading, index) in headings"
+        :key="`${index}-${heading.text}`"
+        type="button"
         class="toc-item"
         :class="`level-${heading.level}`"
-        @click="scrollToHeading(heading.id)"
+        @click="scrollToHeading(index)"
       >
         <span class="toc-text">{{ heading.text }}</span>
-      </div>
+      </button>
     </div>
-  </div>
+  </aside>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { toolbarIcons } from '../utils/toolbarIcons'
 
 interface Heading {
-  id: string
   text: string
   level: number
 }
 
 const props = defineProps<{
   content: string
+  scrollRoot?: HTMLElement | null
+}>()
+
+const emit = defineEmits<{
+  close: []
 }>()
 
 const headings = computed(() => {
   const headingRegex = /^(#{1,6})\s+(.+)$/gm
   const matches: Heading[] = []
   let match
-  
+
   while ((match = headingRegex.exec(props.content)) !== null) {
-    const level = match[1].length
-    const text = match[2].trim()
-    const id = text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-')
-    
     matches.push({
-      id,
-      text,
-      level
+      level: match[1].length,
+      text: match[2].trim(),
     })
   }
-  
+
   return matches
 })
 
-const scrollToHeading = (id: string) => {
-  // 这里可以实现滚动到对应标题的功能
-  console.log('Scroll to:', id)
+const scrollToHeading = (index: number) => {
+  const root = props.scrollRoot
+  if (!root) return
+  const nodes = root.querySelectorAll('h1,h2,h3,h4,h5,h6')
+  nodes[index]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 </script>
 
 <style scoped>
 .toc-panel {
   width: 250px;
+  flex: 0 0 250px;
   background: var(--bg-secondary);
   color: var(--text-primary);
   display: flex;
@@ -77,12 +85,13 @@ const scrollToHeading = (id: string) => {
   height: 35px;
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  justify-content: space-between;
+  padding: 0 8px 0 12px;
   border-bottom: 1px solid var(--border-color);
   font-size: 11px;
-  text-transform: uppercase;
   font-weight: 600;
   letter-spacing: 0.5px;
+  flex-shrink: 0;
 }
 
 .header-title {
@@ -92,17 +101,53 @@ const scrollToHeading = (id: string) => {
   color: var(--text-primary);
 }
 
+.header-icon :deep(svg) {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.toc-close-btn {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.toc-close-btn:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
 .toc-content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 8px 0;
 }
 
+.toc-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .toc-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
   padding: 3px 12px;
   cursor: pointer;
   font-size: 13px;
   line-height: 1.4;
+  color: var(--text-primary);
   transition: background-color 0.2s;
   border-left: 2px solid transparent;
 }

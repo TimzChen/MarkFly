@@ -54,6 +54,13 @@ export const lightMarkdownToHtml = (markdown: string): string => {
       continue
     }
 
+    if (/^!\[([^\]]*)\]\(([^)]+)\)\s*$/.test(line)) {
+      flushList()
+      const imageMatch = line.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/)!
+      html.push(`<p><img alt="${escapeHtml(imageMatch[1])}" src="${escapeHtml(imageMatch[2])}"></p>`)
+      continue
+    }
+
     if (/^(\*\s|-\s|\d+\.\s)/.test(line)) {
       const ordered = /^\d+\.\s/.test(line)
       const nextType = ordered ? 'ol' : 'ul'

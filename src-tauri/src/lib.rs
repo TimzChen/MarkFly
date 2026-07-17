@@ -298,6 +298,17 @@ fn get_pending_open_files(state: State<PendingOpenFiles>) -> Vec<PendingOpenFile
     state.0.lock().unwrap().drain(..).collect()
 }
 
+#[tauri::command]
+fn allow_preview_asset(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !path.is_file() {
+        return Ok(());
+    }
+    app.fs_scope()
+        .allow_file(&path)
+        .map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let initial_boot = read_initial_boot_files();
@@ -310,6 +321,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_app_info,
             get_pending_open_files,
+            allow_preview_asset,
             file_watcher::sync_file_watches
         ]);
 
