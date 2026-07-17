@@ -8,28 +8,34 @@
 
 ## 📦 最新版本发布
 
-### MarkFly v0.1.0 (2026-07-17)
+### MarkFly v0.1.1 (2026-07-17)
 
-[v0.1.0 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.0) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
+[v0.1.1 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.1) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
 
 #### 下载安装包
 
 - **Windows**
-  - [MarkFly_0.1.0_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.0/MarkFly_0.1.0_x64-setup.exe) (4.26 MB)
+  - [MarkFly_0.1.1_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.1/MarkFly_0.1.1_x64-setup.exe) (4.28 MB)
 
 > macOS / Linux 安装包可通过 [GitHub Actions 手动发版](https://github.com/TimzChen/MarkFly/actions/workflows/manual-release.yml) 构建，或参考下方「构建应用」在本地打包。
 
-#### v0.1.0 更新内容
+#### v0.1.1 更新内容
 
-- VS Code 风格界面：标签栏、状态栏、文件列表选中态主题优化
-- 可拖动侧边栏切换按钮，支持位置记忆
-- 编辑器顶栏与 ByteMD 工具栏合并，支持折叠
-- 多种预览布局：分屏 / 仅预览 / 标签切换
-- Shell 双击 `.md` 文件直接打开 MarkFly
-- 外部修改文件变更检测与重新加载提示
-- Windows 发布构建脚本 (`scripts/build-release.ps1`)
+- **启动加速**：Boot 预览层先行渲染，Vue / ByteMD 编辑器懒加载
+- **文件打开加速**：Shell 传入文件预读，打开大文件更快看到内容
+- **预览增强**：GFM 表格管道预加载，复杂 Markdown 预览更稳定
+- **界面优化**：顶栏自适应布局、标签栏交互体验改进
+- **表格样式**：GFM 表格预览样式优化
 
 #### 历史版本
+
+<details>
+<summary>MarkFly v0.1.0 (2026-07-17)</summary>
+
+- **Windows**: [MarkFly_0.1.0_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.0/MarkFly_0.1.0_x64-setup.exe) (4.26 MB)
+- VS Code 风格界面、可拖动侧边栏、顶栏工具栏合并、Shell 打开、外部文件变更检测等
+
+</details>
 
 <details>
 <summary>MarkFly v0.0.1 (2025-09-03)</summary>
@@ -100,7 +106,7 @@ MarkFly 的目标是成为一款轻量级、高性能且功能丰富的 Markdown
 
 ## ✨ 核心特性
 
-- 🚀 **极致性能**: 基于 Rust + Tauri，启动快速，内存占用极低
+- 🚀 **极致性能**: Boot 预览层 + 编辑器懒加载，启动与打开文件更快
 - 🖥️ **跨平台支持**: 完美支持 Windows、macOS、Linux 三大操作系统
 - 📝 **实时预览**: 分屏 / 仅预览 / 标签切换，多种布局随心选
 - 🗂️ **文件管理**: 侧边栏文件树、多标签页、打开文件夹、Shell 关联打开
@@ -174,7 +180,7 @@ Windows 本地发版（NSIS 安装包）：
 
 ```powershell
 .\scripts\build-release.ps1
-# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.0_x64-setup.exe
+# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.1_x64-setup.exe
 ```
 
 ## 📖 使用指南

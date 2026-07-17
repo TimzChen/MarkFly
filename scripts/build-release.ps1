@@ -27,4 +27,4 @@ if (Test-Path $vswhere) {
 npx tauri build --bundles nsis --features custom-protocol
 
 Write-Host ""
-Write-Host "Done:" (Join-Path $projectRoot 'src-tauri\target\release\bundle\nsis\MarkFly_0.1.0_x64-setup.exe')
+Write-Host "Done:" (Join-Path $projectRoot 'src-tauri\target\release\bundle\nsis\MarkFly_0.1.1_x64-setup.exe')
