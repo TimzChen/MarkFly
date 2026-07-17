@@ -10,13 +10,64 @@
         margin: 0;
         padding: 0;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background: #f8f9fa;
+        background: #ffffff;
+        color: #333333;
       }
       #app {
         height: 100vh;
         overflow: hidden;
       }
+      #markfly-boot-layer {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        background: #ffffff;
+      }
+      .markfly-boot-header {
+        height: 35px;
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+        background: #ececec;
+        border-bottom: 1px solid #e5e5e5;
+        font-size: 12px;
+        color: #333333;
+        flex-shrink: 0;
+      }
+      .markfly-boot-content {
+        flex: 1;
+        overflow: auto;
+        padding: 16px 24px;
+        box-sizing: border-box;
+        line-height: 1.6;
+      }
+      .markfly-boot-content h1,
+      .markfly-boot-content h2,
+      .markfly-boot-content h3 {
+        margin: 1em 0 0.5em;
+      }
+      .markfly-boot-content p,
+      .markfly-boot-content ul,
+      .markfly-boot-content ol,
+      .markfly-boot-content pre {
+        margin: 0.5em 0;
+      }
+      .markfly-boot-content pre {
+        background: #f6f8fa;
+        padding: 12px;
+        overflow: auto;
+        border-radius: 6px;
+      }
+      .markfly-boot-content code {
+        background: #f6f8fa;
+        padding: 0.1em 0.3em;
+        border-radius: 4px;
+        font-family: Consolas, Monaco, monospace;
+      }
     </style>
+    <script src="/markfly-boot.js"></script>
   </head>
 
   <body>

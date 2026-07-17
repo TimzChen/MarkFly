@@ -8,6 +8,32 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [vue()],
 
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/vue') || id.includes('node_modules/@vue')) {
+            return 'vue'
+          }
+          if (id.includes('node_modules/pinia')) {
+            return 'pinia'
+          }
+          if (id.includes('node_modules/bytemd') || id.includes('node_modules/@bytemd')) {
+            return 'bytemd'
+          }
+          if (
+            id.includes('node_modules/unified') ||
+            id.includes('node_modules/remark') ||
+            id.includes('node_modules/rehype') ||
+            id.includes('node_modules/micromark')
+          ) {
+            return 'markdown'
+          }
+        },
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

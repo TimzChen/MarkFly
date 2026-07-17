@@ -3,14 +3,23 @@
 
 mod file_watcher;
 
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::collections::HashSet;
 
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
-use tauri::{Emitter, Manager, State};
+use tauri::webview::PageLoadEvent;
+use tauri::{Emitter, Manager, State, Webview};
 use tauri_plugin_fs::FsExt;
 
-struct PendingOpenFiles(Mutex<Vec<String>>);
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct PendingOpenFile {
+    path: String,
+    content: String,
+}
+
+struct PendingOpenFiles(Mutex<Vec<PendingOpenFile>>);
 
 fn collect_paths_from_args<I>(args: I) -> Vec<PathBuf>
 where
@@ -39,14 +48,50 @@ fn resolve_open_files(app: &tauri::AppHandle, paths: Vec<PathBuf>) -> Vec<String
 }
 
 fn store_pending_open_files(app: &tauri::AppHandle, paths: Vec<PathBuf>) -> Vec<String> {
-    let valid_paths = resolve_open_files(app, paths);
+    let fs_scope = app.fs_scope();
+    let mut valid_paths = Vec::new();
+    let mut pending_items = Vec::new();
+    let existing_paths: HashSet<String> = app
+        .state::<PendingOpenFiles>()
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|item| item.path.clone())
+        .collect();
 
-    if !valid_paths.is_empty() {
+    for path in paths {
+        if !path.is_file() {
+            continue;
+        }
+
+        let _ = fs_scope.allow_file(&path);
+        let Some(path_str) = path.to_str() else {
+            continue;
+        };
+
+        if existing_paths.contains(path_str) {
+            valid_paths.push(path_str.to_string());
+            continue;
+        }
+
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+
+        pending_items.push(PendingOpenFile {
+            path: path_str.to_string(),
+            content,
+        });
+        valid_paths.push(path_str.to_string());
+    }
+
+    if !pending_items.is_empty() {
         app.state::<PendingOpenFiles>()
             .0
             .lock()
             .unwrap()
-            .extend(valid_paths.clone());
+            .extend(pending_items);
     }
 
     valid_paths
@@ -58,6 +103,54 @@ fn dispatch_open_files(app: &tauri::AppHandle, paths: Vec<String>) {
     }
 
     let _ = app.emit("open-file-path", paths);
+}
+
+fn read_initial_boot_files() -> Vec<PendingOpenFile> {
+    #[cfg(any(windows, target_os = "linux"))]
+    {
+        collect_paths_from_args(std::env::args().skip(1))
+            .into_iter()
+            .filter_map(|path| {
+                if !path.is_file() {
+                    return None;
+                }
+                let path_str = path.to_str()?.to_string();
+                let content = fs::read_to_string(&path).ok()?;
+                Some(PendingOpenFile {
+                    path: path_str,
+                    content,
+                })
+            })
+            .collect()
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        vec![]
+    }
+}
+
+fn inject_boot_preview(webview: &Webview) {
+    let boot: Vec<PendingOpenFile> = {
+        let state = webview.app_handle().state::<PendingOpenFiles>();
+        let pending = state.0.lock().unwrap();
+        pending.clone()
+    };
+
+    if boot.is_empty() {
+        return;
+    }
+
+    if let Ok(json) = serde_json::to_string(&boot) {
+        let _ = webview.eval(format!(
+            "window.__markflyApplyBoot && window.__markflyApplyBoot({json});"
+        ));
+    }
+}
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+    }
 }
 
 fn focus_main_window(app: &tauri::AppHandle) {
@@ -79,16 +172,18 @@ fn get_app_info() -> serde_json::Value {
 }
 
 #[tauri::command]
-fn get_pending_open_files(state: State<PendingOpenFiles>) -> Vec<String> {
+fn get_pending_open_files(state: State<PendingOpenFiles>) -> Vec<PendingOpenFile> {
     state.0.lock().unwrap().drain(..).collect()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let initial_boot = read_initial_boot_files();
+
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
-        .manage(PendingOpenFiles(Mutex::new(Vec::new())))
+        .manage(PendingOpenFiles(Mutex::new(initial_boot)))
         .manage(file_watcher::FileWatcherState::new())
         .invoke_handler(tauri::generate_handler![
             get_app_info,
@@ -106,7 +201,23 @@ pub fn run() {
     }
 
     builder
+        .on_page_load(|webview: &Webview, payload| {
+            if payload.event() != PageLoadEvent::Finished {
+                return;
+            }
+            inject_boot_preview(webview);
+            show_main_window(webview.app_handle());
+        })
         .setup(|app| {
+            // 尽早读取待打开文件（含内容），供启动预览层使用
+            #[cfg(any(windows, target_os = "linux"))]
+            {
+                let _ = store_pending_open_files(
+                    app.handle(),
+                    collect_paths_from_args(std::env::args().skip(1)),
+                );
+            }
+
             println!("开始创建菜单...");
 
             // 在 macOS 上，第一个菜单会自动成为应用菜单，所以我们创建一个空的应用菜单
@@ -212,15 +323,6 @@ pub fn run() {
                     }
                 }
             });
-
-            // Windows / Linux: 从命令行参数读取右键打开的文件
-            #[cfg(any(windows, target_os = "linux"))]
-            {
-                let _ = store_pending_open_files(
-                    app.handle(),
-                    collect_paths_from_args(std::env::args().skip(1)),
-                );
-            }
 
             // 应用启动时的初始化逻辑
             #[cfg(debug_assertions)]

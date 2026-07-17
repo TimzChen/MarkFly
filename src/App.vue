@@ -90,22 +90,66 @@
                 />
               </svg>
             </button>
+            <div v-if="usePreviewViewer && !toolbarCollapsed" class="preview-layout-toolbar">
+              <button
+                type="button"
+                class="layout-mode-btn"
+                title="分屏"
+                @click.stop="setEditorLayout('split')"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <rect x="3" y="4" width="8" height="16" stroke="currentColor" stroke-width="2"/>
+                  <rect x="13" y="4" width="8" height="16" stroke="currentColor" stroke-width="2"/>
+                </svg>
+              </button>
+              <button
+                type="button"
+                class="layout-mode-btn"
+                title="仅编辑"
+                @click.stop="setEditorLayout('tab')"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <rect x="4" y="4" width="16" height="16" stroke="currentColor" stroke-width="2"/>
+                  <line x1="7" y1="8" x2="17" y2="8" stroke="currentColor" stroke-width="2"/>
+                  <line x1="7" y1="12" x2="14" y2="12" stroke="currentColor" stroke-width="2"/>
+                </svg>
+              </button>
+              <button type="button" class="layout-mode-btn is-active" title="仅预览" disabled>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                  <rect x="4" y="4" width="16" height="16" stroke="currentColor" stroke-width="2"/>
+                  <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                </svg>
+              </button>
+            </div>
           </div>
         </div>
         
-        <div class="editor-content" v-if="currentFile" ref="editorContentRef">
-          <Editor 
-            :value="markdown" 
-            :plugins="plugins"
-            @change="handleChange"
-            :locale="locale"
-            mode="split"
-            :class="['bytemd-editor-wrapper', `markfly-layout-${editorLayout}`]"
-          />
-        </div>
-        
-        <!-- 欢迎界面（启动加载待打开文件时不显示，避免闪屏） -->
-        <div class="welcome-screen" v-else-if="!isBootstrapping">
+        <div class="editor-main">
+          <div
+            class="editor-content"
+            ref="editorContentRef"
+            :class="{ 'is-background': !currentFile }"
+          >
+            <div
+              v-if="usePreviewViewer"
+              ref="previewBodyRef"
+              class="markfly-preview-viewer markdown-body"
+              v-html="previewHtml"
+            />
+            <component
+              v-if="!usePreviewViewer && EditorComponent"
+              :is="EditorComponent"
+              :value="markdown"
+              :plugins="plugins"
+              @change="handleChange"
+              :locale="locale"
+              mode="split"
+              :class="['bytemd-editor-wrapper', `markfly-layout-${editorLayout}`]"
+            />
+          </div>
+
+          <!-- 欢迎界面（启动加载待打开文件时不显示，避免闪屏） -->
+          <div class="welcome-screen" v-show="!currentFile && !isBootstrapping">
           <div class="welcome-content">
             <div class="welcome-header">
               <svg width="64" height="64" viewBox="0 0 24 24" fill="none" class="welcome-icon">
@@ -128,10 +172,9 @@
               </ul>
             </div>
           </div>
+          </div>
         </div>
       </div>
-      
-
     </div>
 
     <!-- 状态栏（合并 ByteMD 内置状态，避免双行重复） -->
@@ -178,26 +221,58 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { Editor } from '@bytemd/vue-next'
-import FileTree from './components/FileTree.vue'
-
-import SettingsPanel from './components/SettingsPanel.vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, shallowRef, defineAsyncComponent, type Component } from 'vue'
+const FileTree = defineAsyncComponent(() => import('./components/FileTree.vue'))
+const SettingsPanel = defineAsyncComponent(() => import('./components/SettingsPanel.vue'))
 import { sampleFiles, type FileItem } from './data/sampleFiles'
 import { useThemeStore } from './stores/theme'
+import { fastMarkdownToHtml } from './utils/fastPreview'
 
-// 导入 ByteMD 插件
-import gfm from '@bytemd/plugin-gfm'
-import highlight from '@bytemd/plugin-highlight'
-import math from '@bytemd/plugin-math'
-import mermaid from '@bytemd/plugin-mermaid'
-import mediumZoom from '@bytemd/plugin-medium-zoom'
+import type { BytemdPlugin } from 'bytemd'
 
 // 导入 Tauri 相关模块
 import { open, save, ask } from '@tauri-apps/plugin-dialog'
 import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+
+type PendingOpenFile = {
+  path: string
+  content: string
+}
+
+declare global {
+  interface Window {
+    __MARKFLY_BOOT__?: PendingOpenFile[]
+    __markflyHideBoot?: () => void
+  }
+}
+
+const readPendingBootstrap = (): Promise<PendingOpenFile[]> => {
+  const boot = window.__MARKFLY_BOOT__
+  if (Array.isArray(boot) && boot.length > 0) {
+    return Promise.resolve(boot)
+  }
+  return invoke<PendingOpenFile[]>('get_pending_open_files').catch(() => [])
+}
+
+// 应用启动后立即拉取待打开文件（与 WebView 初始化并行）
+const pendingBootstrapPromise = readPendingBootstrap()
+
+const EditorComponent = shallowRef<Component | null>(null)
+let editorComponentLoading: Promise<void> | null = null
+
+const ensureEditorComponent = async () => {
+  if (EditorComponent.value) return
+  if (editorComponentLoading) return editorComponentLoading
+
+  editorComponentLoading = (async () => {
+    const mod = await import('@bytemd/vue-next')
+    EditorComponent.value = mod.Editor
+  })()
+
+  return editorComponentLoading
+}
 
 // 主题管理
 const themeStore = useThemeStore()
@@ -252,8 +327,11 @@ const currentLine = ref(1)
 const currentColumn = ref(1)
 const showSettings = ref(false)
 const editorContentRef = ref<HTMLElement | null>(null)
+const previewBodyRef = ref<HTMLElement | null>(null)
 const toolbarHostRef = ref<HTMLElement | null>(null)
 let toolbarObserver: MutationObserver | null = null
+let previewViewerEffectCleanups: Array<() => void> = []
+let bytemdGetProcessor: ((options: { plugins: BytemdPlugin[] }) => { processSync: (value: string) => { toString: () => string } }) | null = null
 const externalChangePaths = ref<string[]>([])
 const watchSuppressUntil = new Map<string, number>()
 let unlistenFileChanged: UnlistenFn | null = null
@@ -274,6 +352,11 @@ const clearExternalChange = (filePath: string) => {
 // 计算属性
 const currentFilePath = computed(() => currentFile.value?.path ?? '')
 const showUnifiedHeader = computed(() => files.value.length > 0 && !!currentFile.value)
+const usePreviewViewer = computed(() => editorLayout.value === 'preview-only')
+
+const clearByteMdToolbarFromHost = () => {
+  toolbarHostRef.value?.querySelectorAll('.bytemd-toolbar').forEach((node) => node.remove())
+}
 
 const resolvedSidebarBtnTop = computed(() => {
   void appBodyHeight.value
@@ -287,7 +370,7 @@ const sidebarToggleBtnStyle = computed(() => ({
 }))
 
 const mountToolbarToHeader = () => {
-  if (!showUnifiedHeader.value) return
+  if (!showUnifiedHeader.value || usePreviewViewer.value) return
 
   const host = toolbarHostRef.value
   const root = editorContentRef.value
@@ -314,6 +397,8 @@ const setupToolbarObserver = () => {
   toolbarObserver?.disconnect()
   toolbarObserver = null
 
+  if (usePreviewViewer.value) return
+
   const root = editorContentRef.value
   if (!root) return
 
@@ -330,14 +415,118 @@ const lineCount = computed(() => {
   return markdown.value.split('\n').length
 })
 
-// ByteMD 插件配置
-const plugins = [
-  gfm(),
-  highlight(),
-  math(),
-  mermaid(),
-  mediumZoom()
-]
+// ByteMD 插件：首屏为空，gfm/highlight/mediumZoom/math/mermaid 均懒加载
+const plugins = ref<BytemdPlugin[]>([])
+let mediumPluginsLoaded = false
+let mediumPluginsLoading: Promise<void> | null = null
+let heavyPluginsLoaded = false
+let heavyPluginsLoading: Promise<void> | null = null
+let fullPreviewProcessorReady = false
+
+const needsMediumPlugins = (content: string) => /```/.test(content)
+
+const needsHeavyPlugins = (content: string) => {
+  if (!content) return false
+  if (/```\s*mermaid\b/.test(content)) return true
+  if (/\$\$[\s\S]+?\$\$/.test(content)) return true
+  if (/(?:^|[^\\])\$(?!\$)[^\n$]+\$(?!\$)/m.test(content)) return true
+  return false
+}
+
+const ensureFullPreviewProcessor = async () => {
+  if (fullPreviewProcessorReady) return
+  const bytemd = await import('bytemd')
+  bytemdGetProcessor = bytemd.getProcessor
+  fullPreviewProcessorReady = true
+}
+
+const loadMediumPlugins = async () => {
+  if (mediumPluginsLoaded) return
+  if (mediumPluginsLoading) return mediumPluginsLoading
+
+  mediumPluginsLoading = (async () => {
+    await ensureFullPreviewProcessor()
+    const [{ default: gfm }, { default: highlight }, { default: mediumZoom }] = await Promise.all([
+      import('@bytemd/plugin-gfm'),
+      import('@bytemd/plugin-highlight'),
+      import('@bytemd/plugin-medium-zoom'),
+      import('highlight.js/styles/vs.css'),
+    ])
+    plugins.value = [gfm(), highlight(), mediumZoom()]
+    mediumPluginsLoaded = true
+  })()
+
+  return mediumPluginsLoading
+}
+
+const loadHeavyPlugins = async () => {
+  if (heavyPluginsLoaded) return
+  if (heavyPluginsLoading) return heavyPluginsLoading
+
+  heavyPluginsLoading = (async () => {
+    await loadMediumPlugins()
+    const [{ default: math }, { default: mermaid }] = await Promise.all([
+      import('@bytemd/plugin-math'),
+      import('@bytemd/plugin-mermaid'),
+      import('katex/dist/katex.css'),
+    ])
+    plugins.value = [...plugins.value, math(), mermaid()]
+    heavyPluginsLoaded = true
+  })()
+
+  return heavyPluginsLoading
+}
+
+const scheduleMediumPluginLoad = (content = markdown.value) => {
+  if (mediumPluginsLoaded || mediumPluginsLoading) return
+  if (needsMediumPlugins(content)) {
+    void loadMediumPlugins()
+    return
+  }
+  const run = () => void loadMediumPlugins()
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(run, { timeout: 3000 })
+  } else {
+    setTimeout(run, 1000)
+  }
+}
+
+const scheduleHeavyPluginLoad = (content = markdown.value) => {
+  if (heavyPluginsLoaded || heavyPluginsLoading) return
+  if (needsHeavyPlugins(content)) {
+    void loadHeavyPlugins()
+    return
+  }
+  const run = () => void loadHeavyPlugins()
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(run, { timeout: 4000 })
+  } else {
+    setTimeout(run, 1500)
+  }
+}
+
+const previewHtml = computed(() => {
+  if (fullPreviewProcessorReady && bytemdGetProcessor) {
+    return bytemdGetProcessor({ plugins: plugins.value }).processSync(markdown.value).toString()
+  }
+  return fastMarkdownToHtml(markdown.value)
+})
+
+const applyPreviewViewerEffects = () => {
+  previewViewerEffectCleanups.forEach((cleanup) => cleanup())
+  previewViewerEffectCleanups = []
+
+  const body = previewBodyRef.value
+  if (!body || !fullPreviewProcessorReady || !bytemdGetProcessor) return
+
+  const file = bytemdGetProcessor({ plugins: plugins.value }).processSync(markdown.value)
+  for (const plugin of plugins.value) {
+    const cleanup = plugin.viewerEffect?.({ markdownBody: body, file } as never)
+    if (typeof cleanup === 'function') {
+      previewViewerEffectCleanups.push(cleanup)
+    }
+  }
+}
 
 // 本地化配置（ByteMD 使用顶层 locale 键）
 const locale = {
@@ -393,7 +582,7 @@ const selectFile = async (file: FileItem) => {
   currentFile.value = file
   markdown.value = file.content
   isModified.value = false
-  await checkPendingExternalChange(file)
+  void checkPendingExternalChange(file)
 }
 
 const createNewFile = () => {
@@ -542,6 +731,11 @@ const togglePreview = () => {
   const currentIndex = modes.indexOf(editorLayout.value)
   editorLayout.value = modes[(currentIndex + 1) % modes.length]
   localStorage.setItem(EDITOR_MODE_STORAGE_KEY, editorLayout.value)
+}
+
+const setEditorLayout = (layout: EditorLayoutMode) => {
+  editorLayout.value = layout
+  localStorage.setItem(EDITOR_MODE_STORAGE_KEY, layout)
 }
 
 const handleToolbarLayoutClick = (event: MouseEvent) => {
@@ -697,7 +891,7 @@ const loadWelcomeSample = () => {
   }
 }
 
-const openFileFromPath = async (filePath: string) => {
+const openFileFromPath = async (filePath: string, preloadedContent?: string) => {
   try {
     const existing = files.value.find((file) => file.path === filePath)
     if (existing) {
@@ -705,7 +899,7 @@ const openFileFromPath = async (filePath: string) => {
       return
     }
 
-    const content = await readTextFile(filePath)
+    const content = preloadedContent ?? await readTextFile(filePath)
     const newFile: FileItem = {
       name: getFileNameFromPath(filePath),
       path: filePath,
@@ -714,18 +908,44 @@ const openFileFromPath = async (filePath: string) => {
 
     files.value.push(newFile)
     selectFile(newFile)
+    scheduleMediumPluginLoad(content)
+    scheduleHeavyPluginLoad(content)
   } catch (error) {
     console.error('打开文件失败:', error)
   }
 }
 
-const openFilePaths = async (paths: string[]) => {
-  if (paths.length === 0) {
-    return
+const openFilePaths = async (items: PendingOpenFile[] | string[]) => {
+  if (items.length === 0) return
+
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index]
+    if (typeof item === 'string') {
+      await openFileFromPath(item)
+      continue
+    }
+
+    const existing = files.value.find((file) => file.path === item.path)
+    if (existing) {
+      if (index === 0) selectFile(existing)
+      continue
+    }
+
+    const newFile: FileItem = {
+      name: getFileNameFromPath(item.path),
+      path: item.path,
+      content: item.content
+    }
+    files.value.push(newFile)
+    if (index === 0) selectFile(newFile)
   }
 
-  for (const filePath of paths) {
-    await openFileFromPath(filePath)
+  const firstContent = typeof items[0] === 'string'
+    ? undefined
+    : items[0].content
+  if (firstContent) {
+    scheduleMediumPluginLoad(firstContent)
+    scheduleHeavyPluginLoad(firstContent)
   }
 }
 
@@ -847,12 +1067,10 @@ const handleKeyDown = (event: KeyboardEvent) => {
 // 初始化主题
 onMounted(async () => {
   themeStore.initTheme()
-  
-  // 添加键盘事件监听器（capture 确保 Ctrl+B 不被编辑器拦截）
   window.addEventListener('keydown', handleKeyDown, true)
 
   try {
-    const pendingFiles = await invoke<string[]>('get_pending_open_files')
+    const pendingFiles = await pendingBootstrapPromise
     if (pendingFiles.length > 0) {
       await openFilePaths(pendingFiles)
     } else if (files.value.length === 0) {
@@ -865,30 +1083,39 @@ onMounted(async () => {
     }
   } finally {
     isBootstrapping.value = false
+    await nextTick()
+    window.__markflyHideBoot?.()
+    if (currentFile.value) {
+      scheduleMediumPluginLoad(markdown.value)
+      scheduleHeavyPluginLoad(markdown.value)
+    }
+    if (typeof requestIdleCallback === 'function') {
+      requestIdleCallback(() => void ensureEditorComponent(), { timeout: 5000 })
+    }
   }
 
+  queueMicrotask(() => {
+    void setupDeferredAppServices()
+  })
+})
+
+const setupDeferredAppServices = async () => {
   await listen<string[]>('open-file-path', async (event) => {
     await openFilePaths(event.payload)
   })
-  
-  // 监听菜单事件
+
   listen('menu', (event) => {
-    console.log('收到菜单事件:', event.payload);
     switch (event.payload) {
       case 'new-file':
-        console.log('新建文件');
         createNewFile()
         break
       case 'open-file':
-        console.log('打开文件');
         openLocalFile()
         break
       case 'save-file':
-        console.log('保存文件');
         saveFileToLocal()
         break
       case 'save-file-as':
-        console.log('另存为');
         saveFileAs()
         break
       case 'toggle-sidebar':
@@ -900,14 +1127,10 @@ onMounted(async () => {
       case 'toggle-theme':
         themeStore.toggleTheme()
         break
-      default:
-        console.log('未知菜单事件:', event.payload);
     }
-  }).then(() => {
-    console.log('菜单事件监听器已注册');
   }).catch((error) => {
-    console.error('注册菜单事件监听器失败:', error);
-  });
+    console.error('注册菜单事件监听器失败:', error)
+  })
 
   unlistenFileChanged = await listen<string>('file-changed', async (event) => {
     await handleExternalFileChange(event.payload)
@@ -916,10 +1139,9 @@ onMounted(async () => {
   await syncDiskFileWatches()
   scheduleToolbarMount()
   nextTick(setupToolbarObserver)
-
   clampSidebarBtnPosition()
   window.addEventListener('resize', clampSidebarBtnPosition)
-})
+}
 
 watch(
   () => files.value.map((file) => file.path).join('\0'),
@@ -938,11 +1160,34 @@ watch(showUnifiedHeader, (visible) => {
   }
 })
 
-watch(editorLayout, scheduleToolbarMount)
+watch(editorLayout, (layout) => {
+  if (layout !== 'preview-only') {
+    void ensureEditorComponent()
+  }
+  if (layout === 'preview-only') {
+    clearByteMdToolbarFromHost()
+  } else {
+    scheduleToolbarMount()
+  }
+})
 
 watch(currentFilePath, () => {
   scheduleToolbarMount()
   nextTick(setupToolbarObserver)
+})
+
+watch(markdown, (content) => {
+  if (!mediumPluginsLoaded && needsMediumPlugins(content)) {
+    void loadMediumPlugins()
+  }
+  if (!heavyPluginsLoaded && needsHeavyPlugins(content)) {
+    void loadHeavyPlugins()
+  }
+})
+
+watch([previewHtml, plugins, usePreviewViewer], () => {
+  if (!usePreviewViewer.value) return
+  nextTick(() => applyPreviewViewerEffects())
 })
 
 // 清理事件监听器
@@ -951,6 +1196,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', clampSidebarBtnPosition)
   unlistenFileChanged?.()
   toolbarObserver?.disconnect()
+  previewViewerEffectCleanups.forEach((cleanup) => cleanup())
   void invoke('sync_file_watches', { paths: [] })
 })
 </script>
@@ -1207,10 +1453,81 @@ onUnmounted(() => {
   flex-wrap: nowrap;
 }
 
+.editor-main {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .editor-content {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+.editor-content.is-background {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.welcome-screen {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+}
+
+.markfly-preview-viewer {
+  height: 100%;
+  overflow: auto;
+  padding: 16px 24px;
+  box-sizing: border-box;
+  background: var(--editor-bg);
+}
+
+.preview-layout-toolbar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  padding-right: 8px;
+}
+
+.layout-mode-btn {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.layout-mode-btn:hover:not(:disabled) {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.layout-mode-btn.is-active {
+  color: var(--accent-color);
+  cursor: default;
 }
 
 /* 添加编辑器包装器样式 */
@@ -1227,15 +1544,6 @@ onUnmounted(() => {
 /* 隐藏 ByteMD 内置状态栏，统一使用应用底部状态栏 */
 .bytemd-editor-wrapper :deep(.bytemd-status) {
   display: none !important;
-}
-
-.markfly-layout-preview-only :deep(.bytemd-editor) {
-  display: none !important;
-}
-
-.markfly-layout-preview-only :deep(.bytemd-preview) {
-  display: block !important;
-  width: 100% !important;
 }
 
 .markfly-layout-tab :deep(.bytemd-preview) {
