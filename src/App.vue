@@ -63,7 +63,7 @@
                 class="tab-reload-dot"
                 title="文件已在磁盘上被修改"
               />
-              <button class="tab-close" @click.stop="closeFile(file)" v-if="files.length > 1" title="关闭文件">
+              <button class="tab-close" @click.stop="closeFile(file)" title="关闭文件">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
                   <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2"/>
                   <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2"/>
@@ -84,7 +84,7 @@
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
                 <polyline
-                  :points="toolbarCollapsed ? '15,6 9,12 15,18' : '9,6 15,12 9,18'"
+                  :points="toolbarCollapsed ? '9,6 15,12 9,18' : '15,6 9,12 15,18'"
                   stroke="currentColor"
                   stroke-width="2"
                 />
@@ -104,8 +104,8 @@
           />
         </div>
         
-        <!-- 欢迎界面 -->
-        <div class="welcome-screen" v-else>
+        <!-- 欢迎界面（启动加载待打开文件时不显示，避免闪屏） -->
+        <div class="welcome-screen" v-else-if="!isBootstrapping">
           <div class="welcome-content">
             <div class="welcome-header">
               <svg width="64" height="64" viewBox="0 0 24 24" fill="none" class="welcome-icon">
@@ -234,6 +234,7 @@ const getCenteredSidebarBtnTop = () => {
 
 // 响应式数据
 const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_STORAGE_KEY) !== 'false')
+const isBootstrapping = ref(true)
 const sidebarBtnTop = ref<number | null>(loadSidebarBtnTop())
 const appBodyHeight = ref(0)
 const isDraggingSidebarBtn = ref(false)
@@ -850,6 +851,22 @@ onMounted(async () => {
   // 添加键盘事件监听器（capture 确保 Ctrl+B 不被编辑器拦截）
   window.addEventListener('keydown', handleKeyDown, true)
 
+  try {
+    const pendingFiles = await invoke<string[]>('get_pending_open_files')
+    if (pendingFiles.length > 0) {
+      await openFilePaths(pendingFiles)
+    } else if (files.value.length === 0) {
+      loadWelcomeSample()
+    }
+  } catch (error) {
+    console.error('启动时打开文件失败:', error)
+    if (files.value.length === 0) {
+      loadWelcomeSample()
+    }
+  } finally {
+    isBootstrapping.value = false
+  }
+
   await listen<string[]>('open-file-path', async (event) => {
     await openFilePaths(event.payload)
   })
@@ -895,13 +912,6 @@ onMounted(async () => {
   unlistenFileChanged = await listen<string>('file-changed', async (event) => {
     await handleExternalFileChange(event.payload)
   })
-
-  const pendingFiles = await invoke<string[]>('get_pending_open_files')
-  if (pendingFiles.length > 0) {
-    await openFilePaths(pendingFiles)
-  } else if (files.value.length === 0) {
-    loadWelcomeSample()
-  }
 
   await syncDiskFileWatches()
   scheduleToolbarMount()
@@ -985,8 +995,10 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 12px;
+  padding: 0 10px 0 12px;
   height: 100%;
+  max-width: 220px;
+  min-width: 0;
   background: transparent;
   border-radius: 0;
   cursor: pointer;
@@ -1019,7 +1031,8 @@ onUnmounted(() => {
 }
 
 .tab-name {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1045,17 +1058,17 @@ onUnmounted(() => {
   justify-content: center;
   cursor: pointer;
   opacity: 0;
-  transition: all 0.2s ease;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
   flex-shrink: 0;
 }
 
-.file-tab:hover .tab-close {
-  opacity: 1;
+.file-tab:hover .tab-close,
+.file-tab.active .tab-close {
+  opacity: 0.65;
 }
 
 .file-tab.active .tab-close {
   color: var(--tab-inactive-fg);
-  opacity: 1;
 }
 
 .tab-close:hover {
