@@ -78,6 +78,39 @@
             class="toolbar-host"
             :class="{ collapsed: toolbarCollapsed }"
           >
+            <div ref="toolbarActionsRef" class="toolbar-actions">
+              <div v-if="usePreviewViewer && !toolbarCollapsed" class="preview-layout-toolbar">
+                <button
+                  type="button"
+                  class="layout-mode-btn"
+                  title="分屏"
+                  @click.stop="setEditorLayout('split')"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                    <rect x="3" y="4" width="8" height="16" stroke="currentColor" stroke-width="2"/>
+                    <rect x="13" y="4" width="8" height="16" stroke="currentColor" stroke-width="2"/>
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="layout-mode-btn"
+                  title="仅编辑"
+                  @click.stop="setEditorLayout('tab')"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                    <rect x="4" y="4" width="16" height="16" stroke="currentColor" stroke-width="2"/>
+                    <line x1="7" y1="8" x2="17" y2="8" stroke="currentColor" stroke-width="2"/>
+                    <line x1="7" y1="12" x2="14" y2="12" stroke="currentColor" stroke-width="2"/>
+                  </svg>
+                </button>
+                <button type="button" class="layout-mode-btn is-active" title="仅预览" disabled>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                    <rect x="4" y="4" width="16" height="16" stroke="currentColor" stroke-width="2"/>
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
             <button
               class="toolbar-toggle-btn"
               @click.stop="toggleToolbar"
@@ -85,43 +118,12 @@
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
                 <polyline
-                  :points="toolbarCollapsed ? '9,6 15,12 9,18' : '15,6 9,12 15,18'"
+                  :points="toolbarCollapsed ? '15,6 9,12 15,18' : '9,6 15,12 9,18'"
                   stroke="currentColor"
                   stroke-width="2"
                 />
               </svg>
             </button>
-            <div v-if="usePreviewViewer && !toolbarCollapsed" class="preview-layout-toolbar">
-              <button
-                type="button"
-                class="layout-mode-btn"
-                title="分屏"
-                @click.stop="setEditorLayout('split')"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                  <rect x="3" y="4" width="8" height="16" stroke="currentColor" stroke-width="2"/>
-                  <rect x="13" y="4" width="8" height="16" stroke="currentColor" stroke-width="2"/>
-                </svg>
-              </button>
-              <button
-                type="button"
-                class="layout-mode-btn"
-                title="仅编辑"
-                @click.stop="setEditorLayout('tab')"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                  <rect x="4" y="4" width="16" height="16" stroke="currentColor" stroke-width="2"/>
-                  <line x1="7" y1="8" x2="17" y2="8" stroke="currentColor" stroke-width="2"/>
-                  <line x1="7" y1="12" x2="14" y2="12" stroke="currentColor" stroke-width="2"/>
-                </svg>
-              </button>
-              <button type="button" class="layout-mode-btn is-active" title="仅预览" disabled>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                  <rect x="4" y="4" width="16" height="16" stroke="currentColor" stroke-width="2"/>
-                  <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/>
-                </svg>
-              </button>
-            </div>
           </div>
         </div>
         
@@ -229,6 +231,7 @@ import type { FileItem } from './data/sampleFiles'
 import { useThemeStore } from './stores/theme'
 import { lightMarkdownToHtml } from './utils/lightMarkdown'
 import { needsFullPreview, stripFrontmatter } from './utils/markdownPreview'
+import { consumeMediumPreviewPreload, startMediumPreviewPreload } from './utils/previewEngine'
 import {
   tauriInvoke,
   tauriListen,
@@ -250,6 +253,7 @@ type PendingOpenFile = {
 declare global {
   interface Window {
     __MARKFLY_BOOT__?: PendingOpenFile[]
+    __MARKFLY_BOOT_DISMISSED__?: boolean
     __markflyHideBoot?: () => void
   }
 }
@@ -257,6 +261,9 @@ declare global {
 const readPendingBootstrap = (): Promise<PendingOpenFile[]> => {
   const boot = window.__MARKFLY_BOOT__
   if (Array.isArray(boot) && boot.length > 0) {
+    if (boot[0]?.content) {
+      startMediumPreviewPreload(boot[0].content)
+    }
     return Promise.resolve(boot)
   }
   return tauriInvoke<PendingOpenFile[]>('get_pending_open_files').catch(() => [])
@@ -337,6 +344,7 @@ const showSettings = ref(false)
 const editorContentRef = ref<HTMLElement | null>(null)
 const previewBodyRef = ref<HTMLElement | null>(null)
 const toolbarHostRef = ref<HTMLElement | null>(null)
+const toolbarActionsRef = ref<HTMLElement | null>(null)
 let toolbarObserver: MutationObserver | null = null
 let previewViewerEffectCleanups: Array<() => void> = []
 let bytemdGetProcessor: ((options: { plugins: BytemdPlugin[] }) => { processSync: (value: string) => { toString: () => string } }) | null = null
@@ -363,7 +371,7 @@ const showUnifiedHeader = computed(() => files.value.length > 0 && !!currentFile
 const usePreviewViewer = computed(() => editorLayout.value === 'preview-only')
 
 const clearByteMdToolbarFromHost = () => {
-  toolbarHostRef.value?.querySelectorAll('.bytemd-toolbar').forEach((node) => node.remove())
+  toolbarActionsRef.value?.querySelectorAll('.bytemd-toolbar').forEach((node) => node.remove())
 }
 
 const resolvedSidebarBtnTop = computed(() => {
@@ -380,15 +388,15 @@ const sidebarToggleBtnStyle = computed(() => ({
 const mountToolbarToHeader = () => {
   if (!showUnifiedHeader.value || usePreviewViewer.value) return
 
-  const host = toolbarHostRef.value
+  const actions = toolbarActionsRef.value
   const root = editorContentRef.value
-  if (!host || !root) return
+  if (!actions || !root) return
 
   const toolbar = root.querySelector('.bytemd .bytemd-toolbar') as HTMLElement | null
-  if (!toolbar || toolbar.parentElement === host) return
+  if (!toolbar || toolbar.parentElement === actions) return
 
-  host.querySelectorAll('.bytemd-toolbar').forEach((node) => node.remove())
-  host.appendChild(toolbar)
+  actions.querySelectorAll('.bytemd-toolbar').forEach((node) => node.remove())
+  actions.appendChild(toolbar)
 }
 
 const scheduleToolbarMount = () => {
@@ -454,17 +462,36 @@ const loadMediumPlugins = async () => {
   if (mediumPluginsLoading) return mediumPluginsLoading
 
   mediumPluginsLoading = (async () => {
-    await ensureFullPreviewProcessor()
-    const [{ default: gfm }, { default: highlight }, { default: mediumZoom }] = await Promise.all([
-      import('@bytemd/plugin-gfm'),
-      import('@bytemd/plugin-highlight'),
-      import('@bytemd/plugin-medium-zoom'),
-      import('highlight.js/styles/vs.css'),
-    ])
-    plugins.value = [gfm(), highlight(), mediumZoom()]
+    const preloaded = consumeMediumPreviewPreload()
+    if (preloaded) {
+      try {
+        const modules = await preloaded
+        bytemdGetProcessor = modules.getProcessor
+        fullPreviewProcessorReady = true
+        plugins.value = modules.createPlugins()
+      } catch (error) {
+        console.warn('GFM 预加载失败，改为直接加载:', error)
+      }
+    }
+
+    if (!mediumPluginsLoaded && plugins.value.length === 0) {
+      await ensureFullPreviewProcessor()
+      const [{ default: gfm }, { default: highlight }, { default: mediumZoom }] = await Promise.all([
+        import('@bytemd/plugin-gfm'),
+        import('@bytemd/plugin-highlight'),
+        import('@bytemd/plugin-medium-zoom'),
+        import('highlight.js/styles/vs.css'),
+      ])
+      plugins.value = [gfm(), highlight(), mediumZoom()]
+    }
+
     mediumPluginsLoaded = true
     previewEngineReady.value = true
-  })()
+  })().catch((error) => {
+    mediumPluginsLoading = null
+    console.error('加载预览插件失败:', error)
+    throw error
+  })
 
   return mediumPluginsLoading
 }
@@ -502,9 +529,12 @@ const scheduleMediumPluginLoad = (content = markdown.value) => {
 }
 
 const ensurePreviewPipeline = async () => {
-  if (editorLayout.value !== 'preview-only') return
   await loadMediumPlugins()
-  scheduleHeavyPluginLoad(markdown.value)
+  if (needsHeavyPlugins(markdown.value)) {
+    await loadHeavyPlugins()
+  } else {
+    scheduleHeavyPluginLoad(markdown.value)
+  }
 }
 
 const scheduleHeavyPluginLoad = (content = markdown.value) => {
@@ -527,10 +557,14 @@ const previewWaitingForPipeline = computed(
   () => usePreviewViewer.value && needsFullPreview(markdown.value) && !previewEngineReady.value
 )
 
+const normalizePreviewHtml = (html: string): string =>
+  html.replace(/>\s*\n{2,}\s*</g, '><')
+
 const previewHtml = computed(() => {
   const source = previewSource.value
   if (previewEngineReady.value && bytemdGetProcessor && plugins.value.length > 0) {
-    return bytemdGetProcessor({ plugins: plugins.value }).processSync(source).toString()
+    const html = bytemdGetProcessor({ plugins: plugins.value }).processSync(source).toString()
+    return normalizePreviewHtml(html)
   }
   if (needsFullPreview(markdown.value)) {
     return '<p class="preview-loading-hint">正在加载完整预览…</p>'
@@ -610,6 +644,7 @@ const selectFile = async (file: FileItem) => {
   isModified.value = false
   void checkPendingExternalChange(file)
   if (needsFullPreview(file.content)) {
+    startMediumPreviewPreload(file.content)
     await loadMediumPlugins()
   }
   await ensurePreviewPipeline()
@@ -1098,20 +1133,16 @@ const hideBootLayer = async () => {
 }
 
 const mountDeferredChrome = () => {
-  const show = () => {
-    showDeferredChrome.value = true
-  }
-  if (typeof requestIdleCallback === 'function') {
-    requestIdleCallback(show, { timeout: 800 })
-  } else {
-    setTimeout(show, 200)
-  }
+  showDeferredChrome.value = true
 }
 
 // 初始化主题
 onMounted(async () => {
   themeStore.initTheme()
   window.addEventListener('keydown', handleKeyDown, true)
+
+  // 尽早关闭 boot 层，避免 PageLoad Finished 再次注入 boot 盖住 Vue UI
+  await hideBootLayer()
 
   try {
     const pendingFiles = await pendingBootstrapPromise
@@ -1127,9 +1158,12 @@ onMounted(async () => {
     }
   } finally {
     isBootstrapping.value = false
-    await hideBootLayer()
-    if (currentFile.value) {
-      await ensurePreviewPipeline()
+    try {
+      if (currentFile.value) {
+        await ensurePreviewPipeline()
+      }
+    } catch (error) {
+      console.error('预览管道加载失败:', error)
     }
     mountDeferredChrome()
     if (typeof requestIdleCallback === 'function') {
@@ -1431,32 +1465,52 @@ onUnmounted(() => {
 .editor-unified-header.is-merged {
   display: flex;
   align-items: stretch;
-  height: 35px;
+  min-height: 35px;
+  height: auto;
   flex-shrink: 0;
   background: var(--tab-bar-bg);
   border-bottom: 1px solid var(--border-color);
 }
 
 .editor-unified-header.is-merged .file-tabs {
-  flex: 0 1 auto;
-  max-width: 45%;
-  min-width: 0;
-  height: 100%;
+  flex: 1 1 0;
+  min-width: 64px;
+  height: auto;
+  min-height: 35px;
   border-bottom: none;
   background: transparent;
   padding-right: 4px;
 }
 
 .toolbar-host {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
+  align-self: stretch;
+  justify-content: flex-end;
   gap: 2px;
 }
 
 .toolbar-host.collapsed {
-  flex: 0;
+  flex: 0 0 auto;
+  min-width: 28px;
+}
+
+.toolbar-actions {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  align-content: center;
+  max-height: 70px;
+  overflow: hidden;
+}
+
+.toolbar-host.collapsed .toolbar-actions {
+  display: none;
 }
 
 .toolbar-toggle-btn {
@@ -1470,8 +1524,14 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  flex: 0 0 auto;
   flex-shrink: 0;
+  margin-right: 4px;
   transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.toolbar-host.collapsed .toolbar-toggle-btn {
+  color: var(--text-primary);
 }
 
 .toolbar-toggle-btn:hover {
@@ -1479,24 +1539,28 @@ onUnmounted(() => {
   color: var(--text-primary);
 }
 
-.toolbar-host.collapsed :deep(.bytemd-toolbar) {
-  display: none !important;
-}
-
-.toolbar-host :deep(.bytemd-toolbar) {
-  flex: 1;
+.toolbar-actions :deep(.bytemd-toolbar) {
+  flex: 0 1 auto;
   min-width: 0;
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   border-bottom: none !important;
   background: transparent !important;
   padding: 0 8px !important;
   min-height: 35px !important;
-  height: 35px !important;
+  height: auto !important;
+  max-height: 70px !important;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-content: center;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
-.toolbar-host :deep(.bytemd-toolbar-left),
-.toolbar-host :deep(.bytemd-toolbar-right) {
-  flex-wrap: nowrap;
+.toolbar-actions :deep(.bytemd-toolbar-left),
+.toolbar-actions :deep(.bytemd-toolbar-right) {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .editor-main {
@@ -1542,13 +1606,11 @@ onUnmounted(() => {
 }
 
 .preview-layout-toolbar {
-  flex: 1;
-  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 2px;
-  padding-right: 8px;
+  padding-right: 4px;
 }
 
 .layout-mode-btn {

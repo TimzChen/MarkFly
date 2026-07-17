@@ -28,7 +28,6 @@
     let inCode = false
     let codeLines = []
     let listType = ''
-    let tablePlaceholderShown = false
 
     const flushList = () => {
       if (listType) {
@@ -37,20 +36,7 @@
       }
     }
 
-    const isTableLine = (line) => {
-      const trimmed = line.trim()
-      return trimmed.startsWith('|') && trimmed.endsWith('|')
-    }
-
     for (const line of lines) {
-      if (isTableLine(line)) {
-        flushList()
-        if (!tablePlaceholderShown) {
-          html.push('<p class="markfly-boot-truncated"><em>表格正在加载完整预览…</em></p>')
-          tablePlaceholderShown = true
-        }
-        continue
-      }
       if (line.startsWith('```')) {
         flushList()
         if (!inCode) {
@@ -140,6 +126,29 @@
     return layer
   }
 
+  function needsFullPreviewLite(content) {
+    if (!content) return false
+    if (/^\s*---\r?\n[\s\S]*?\r?\n---/.test(content)) return true
+    if (/^\|.+\|\s*$/m.test(content)) return true
+    if (/^>\s/m.test(content)) return true
+    if (/```/.test(content)) return true
+    return false
+  }
+
+  function ensurePreviewPreloadStarted(content) {
+    if (!needsFullPreviewLite(content || '')) return
+    if (window.__MARKFLY_MEDIUM_PRELOAD__) return
+    var src = window.__MARKFLY_PRELOAD_ENTRY__
+    if (!src) return
+    if (document.querySelector('script[data-markfly-preload]')) return
+    var script = document.createElement('script')
+    script.type = 'module'
+    script.crossOrigin = 'anonymous'
+    script.src = src
+    script.setAttribute('data-markfly-preload', '1')
+    document.head.appendChild(script)
+  }
+
   function renderBoot(files) {
     if (!files || !files.length) return
 
@@ -151,14 +160,17 @@
       html += '<p class="markfly-boot-truncated"><em>文档较长，正在加载完整内容…</em></p>'
     }
     document.getElementById('markfly-boot-content').innerHTML = html
+    ensurePreviewPreloadStarted(first.content || '')
   }
 
   window.__markflyApplyBoot = function (files) {
     window.__MARKFLY_BOOT__ = files
+    if (window.__MARKFLY_BOOT_DISMISSED__) return
     renderBoot(files)
   }
 
   window.__markflyHideBoot = function () {
+    window.__MARKFLY_BOOT_DISMISSED__ = true
     const layer = document.getElementById('markfly-boot-layer')
     if (layer) layer.remove()
     document.documentElement.classList.remove('boot-dark')

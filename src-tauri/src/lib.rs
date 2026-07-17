@@ -176,19 +176,6 @@ fn inject_boot_data(webview: &Webview) {
     }
 }
 
-fn inject_boot_preview(webview: &Webview) {
-    let boot = pending_boot_snapshot(webview);
-    if boot.is_empty() {
-        return;
-    }
-
-    if let Ok(json) = serde_json::to_string(&boot_preview_files(&boot)) {
-        let _ = webview.eval(format!(
-            "window.__markflyApplyBoot && window.__markflyApplyBoot({json});"
-        ));
-    }
-}
-
 fn has_pending_boot(webview: &Webview) -> bool {
     !pending_boot_snapshot(webview).is_empty()
 }
@@ -345,7 +332,8 @@ pub fn run() {
                     }
                 }
                 PageLoadEvent::Finished => {
-                    inject_boot_preview(webview);
+                    // 仅同步 boot 数据；渲染由 boot.js 根据 __MARKFLY_BOOT_DISMISSED__ 决定是否跳过
+                    inject_boot_data(webview);
                     show_main_window(webview.app_handle());
                 }
             }

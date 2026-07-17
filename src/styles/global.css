@@ -37,6 +37,12 @@
   --code-bg: #f8f9fa;
   --code-text: #e83e8c;
   --code-border: #dee2e6;
+
+  /* 表格：低对比斑马纹，偏阅读器风格 */
+  --table-row-bg: #ffffff;
+  --table-stripe-bg: #f9fafb;
+  --table-header-bg: #f5f6f8;
+  --table-border: #e9edf1;
 }
 
 /* 深色主题 */
@@ -77,6 +83,12 @@
   --code-bg: #2d2d30;
   --code-text: #f8f8f2;
   --code-border: #3e3e42;
+
+  /* 表格 */
+  --table-row-bg: #1e1e1e;
+  --table-stripe-bg: #232327;
+  --table-header-bg: #262629;
+  --table-border: #34343a;
 }
 
 /* 全局样式重置 */
@@ -141,21 +153,29 @@ html, body {
   /* 移除 overflow: hidden，让内部组件处理滚动 */
 }
 
-/* 顶栏合并：工具栏 DOM 移入 .toolbar-host 后的样式 */
-.toolbar-host .bytemd-toolbar {
-  flex: 1;
+/* 顶栏合并：工具栏 DOM 移入 .toolbar-actions 后的样式 */
+.toolbar-actions .bytemd-toolbar {
+  flex: 0 1 auto;
   min-width: 0;
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   border-bottom: none !important;
   background: transparent !important;
   padding: 0 8px !important;
   min-height: 35px !important;
-  height: 35px !important;
+  height: auto !important;
+  max-height: 70px !important;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-content: center;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
-.toolbar-host .bytemd-toolbar-left,
-.toolbar-host .bytemd-toolbar-right {
-  flex-wrap: nowrap;
+.toolbar-actions .bytemd-toolbar-left,
+.toolbar-actions .bytemd-toolbar-right {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 /* 保留ByteMD自带的工具栏，但调整样式 */
@@ -301,17 +321,31 @@ html, body {
   color: var(--text-secondary) !important;
 }
 
+/* 预览区表格：统一简洁配色，覆盖 github-markdown-css 默认灰 */
 .bytemd-preview .markdown-body table th,
-.bytemd-preview .markdown-body table td {
-  border-color: var(--border-color) !important;
+.bytemd-preview .markdown-body table td,
+.markfly-preview-viewer.markdown-body table th,
+.markfly-preview-viewer.markdown-body table td {
+  border-color: var(--table-border) !important;
+  padding: 8px 12px !important;
 }
 
-.bytemd-preview .markdown-body table th {
-  background: var(--bg-secondary) !important;
+.bytemd-preview .markdown-body table th,
+.markfly-preview-viewer.markdown-body table th {
+  background: var(--table-header-bg) !important;
+  color: var(--text-primary) !important;
+  font-weight: 600;
 }
 
-.bytemd-preview .markdown-body table tr:nth-child(2n) {
-  background: var(--bg-secondary) !important;
+.bytemd-preview .markdown-body table tr,
+.markfly-preview-viewer.markdown-body table tr {
+  background: var(--table-row-bg) !important;
+  border-top-color: var(--table-border) !important;
+}
+
+.bytemd-preview .markdown-body table tr:nth-child(2n),
+.markfly-preview-viewer.markdown-body table tr:nth-child(2n) {
+  background: var(--table-stripe-bg) !important;
 }
 
 /* 确保滚动区域正确，防止滚动穿透 */
@@ -414,28 +448,4 @@ html, body {
   color: var(--text-secondary);
   padding: 16px 0;
   font-size: 13px;
-}
-
-.markfly-preview-viewer.markdown-body table {
-  display: table;
-  width: 100%;
-  border-collapse: collapse;
-  margin: 12px 0;
-  overflow: auto;
-}
-
-.markfly-preview-viewer.markdown-body th,
-.markfly-preview-viewer.markdown-body td {
-  border: 1px solid var(--border-color);
-  padding: 6px 10px;
-  vertical-align: top;
-}
-
-.markfly-preview-viewer.markdown-body th {
-  background: var(--bg-secondary);
-  font-weight: 600;
-}
-
-.markfly-preview-viewer.markdown-body tr:nth-child(even) td {
-  background: var(--bg-tertiary);
 }

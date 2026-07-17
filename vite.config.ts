@@ -1,8 +1,12 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
+import { resolve } from "node:path";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
+
+const PRELOAD_ENTRY = "/assets/previewPreload.js";
+const DEV_PRELOAD_ENTRY = "/src/previewPreload.ts";
 
 function markflyDeferAppLoad() {
   return {
@@ -11,15 +15,16 @@ function markflyDeferAppLoad() {
       order: "post" as const,
       handler(html: string, ctx: { server?: unknown }) {
         const entryMatch = html.match(
-          /<script type="module" crossorigin src="(\/assets\/index-[^"]+\.js)"><\/script>/
+          /<script type="module" crossorigin src="(\/assets\/(?:index|main)-[^"]+\.js)"><\/script>/
         );
         const devEntry = '/src/main.ts';
+        const preloadScript = `<script>window.__MARKFLY_PRELOAD_ENTRY__="${ctx.server ? DEV_PRELOAD_ENTRY : PRELOAD_ENTRY}"</script>`;
 
         if (ctx.server) {
           return html
             .replace(
               `<script type="module" src="${devEntry}"></script>`,
-              `<script>window.__MARKFLY_ENTRY__="${devEntry}"</script>`
+              `<script>window.__MARKFLY_ENTRY__="${devEntry}"</script>${preloadScript}`
             )
             .replace(
               /<link rel="modulepreload"[^>]+>\s*/g,
@@ -38,7 +43,7 @@ function markflyDeferAppLoad() {
           .replace(entryMatch[0], "")
           .replace(
             '<script src="/markfly-boot.js"></script>',
-            `<script src="/markfly-boot.js"></script><script>window.__MARKFLY_ENTRY__="${entry}"</script>`
+            `<script src="/markfly-boot.js"></script><script>window.__MARKFLY_ENTRY__="${entry}"</script>${preloadScript}`
           )
           .replace(/<link rel="modulepreload"[^>]+>\s*/g, "")
           .replace(
@@ -61,7 +66,17 @@ export default defineConfig(async () => ({
   build: {
     modulePreload: false,
     rollupOptions: {
+      input: {
+        main: resolve(__dirname, "index.html"),
+        previewPreload: resolve(__dirname, "src/previewPreload.ts"),
+      },
       output: {
+        entryFileNames: (chunkInfo) => {
+          if (chunkInfo.name === "previewPreload") {
+            return "assets/previewPreload.js";
+          }
+          return "assets/[name]-[hash].js";
+        },
         manualChunks(id) {
           if (id.includes("node_modules/@tauri-apps")) {
             return "tauri";
