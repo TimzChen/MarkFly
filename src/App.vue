@@ -1,7 +1,7 @@
 <template>
   <div class="markfly-app">
     <!-- 主编辑区域 -->
-    <div class="app-body">
+    <div class="app-body" ref="appBodyRef">
       <!-- 左侧文件树 -->
       <FileTree 
         :files="files"
@@ -11,29 +11,41 @@
         @newFile="createNewFile"
         @openFolder="openFolder"
         @closeFile="closeFile"
-        @toggleCollapse="toggleSidebar"
       />
 
       <button
-        v-if="sidebarCollapsed"
-        class="sidebar-expand-btn"
-        @click="toggleSidebar"
-        title="显示侧边栏 (视图菜单 Ctrl+B)"
+        class="sidebar-toggle-btn"
+        :class="{
+          dragging: isDraggingSidebarBtn,
+          'is-collapsed': sidebarCollapsed,
+          'is-expanded': !sidebarCollapsed,
+        }"
+        :style="sidebarToggleBtnStyle"
+        :title="sidebarCollapsed ? '显示侧边栏 (可拖动，Ctrl+B)' : '隐藏侧边栏 (可拖动，Ctrl+B)'"
+        @pointerdown="onSidebarBtnPointerDown"
+        @pointermove="onSidebarBtnPointerMove"
+        @pointerup="onSidebarBtnPointerUp"
+        @pointercancel="onSidebarBtnPointerUp"
+        @click="onSidebarBtnClick"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-          <polyline points="9,6 15,12 9,18" stroke="currentColor" stroke-width="2"/>
+          <polyline
+            :points="sidebarCollapsed ? '9,6 15,12 9,18' : '15,6 9,12 15,18'"
+            stroke="currentColor"
+            stroke-width="2"
+          />
         </svg>
       </button>
       
       <!-- 中央编辑区域 -->
-      <div class="editor-container" :class="{ 'has-unified-header': showUnifiedHeader }">
+      <div class="editor-container">
         <div
           v-if="files.length > 0"
           class="editor-unified-header"
           :class="{ 'is-merged': showUnifiedHeader }"
-          :style="showUnifiedHeader ? { '--tabs-width': `${tabsBarWidth}px` } : undefined"
+          @click.capture="handleToolbarLayoutClick"
         >
-          <div class="file-tabs" ref="fileTabsRef">
+          <div class="file-tabs">
             <div 
               v-for="file in files" 
               :key="file.path"
@@ -59,16 +71,30 @@
               </button>
             </div>
           </div>
+          <div
+            v-if="showUnifiedHeader"
+            ref="toolbarHostRef"
+            class="toolbar-host"
+            :class="{ collapsed: toolbarCollapsed }"
+          >
+            <button
+              class="toolbar-toggle-btn"
+              @click.stop="toggleToolbar"
+              :title="toolbarCollapsed ? '显示工具栏' : '隐藏工具栏'"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <polyline
+                  :points="toolbarCollapsed ? '15,6 9,12 15,18' : '9,6 15,12 9,18'"
+                  stroke="currentColor"
+                  stroke-width="2"
+                />
+              </svg>
+            </button>
+          </div>
         </div>
         
-        <div
-          class="editor-content"
-          v-if="currentFile"
-          :class="{ 'with-unified-header': showUnifiedHeader }"
-          @click.capture="handleToolbarLayoutClick"
-        >
+        <div class="editor-content" v-if="currentFile" ref="editorContentRef">
           <Editor 
-            :key="editorLayout"
             :value="markdown" 
             :plugins="plugins"
             @change="handleChange"
@@ -177,7 +203,11 @@ import { invoke } from '@tauri-apps/api/core'
 const themeStore = useThemeStore()
 
 const SIDEBAR_STORAGE_KEY = 'markfly-sidebar-collapsed'
+const SIDEBAR_BTN_TOP_KEY = 'markfly-sidebar-btn-top'
+const TOOLBAR_STORAGE_KEY = 'markfly-toolbar-collapsed'
 const EDITOR_MODE_STORAGE_KEY = 'markfly-editor-mode'
+const SIDEBAR_WIDTH = 280
+const SIDEBAR_BTN_HEIGHT = 48
 
 type EditorLayoutMode = 'preview-only' | 'split' | 'tab'
 
@@ -189,8 +219,29 @@ const loadEditorLayout = (): EditorLayoutMode => {
   return 'preview-only'
 }
 
+const loadSidebarBtnTop = (): number | null => {
+  const stored = localStorage.getItem(SIDEBAR_BTN_TOP_KEY)
+  if (!stored || stored === 'center') return null
+  const value = Number.parseInt(stored, 10)
+  if (!Number.isNaN(value) && value >= 0) return value
+  return null
+}
+
+const getCenteredSidebarBtnTop = () => {
+  const bodyHeight = appBodyRef.value?.clientHeight ?? 600
+  return Math.max(0, (bodyHeight - SIDEBAR_BTN_HEIGHT) / 2)
+}
+
 // 响应式数据
 const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_STORAGE_KEY) !== 'false')
+const sidebarBtnTop = ref<number | null>(loadSidebarBtnTop())
+const appBodyHeight = ref(0)
+const isDraggingSidebarBtn = ref(false)
+const appBodyRef = ref<HTMLElement | null>(null)
+let sidebarBtnDragStartY = 0
+let sidebarBtnDragStartTop = 0
+let sidebarBtnDidDrag = false
+const toolbarCollapsed = ref(localStorage.getItem(TOOLBAR_STORAGE_KEY) === 'true')
 const files = ref<FileItem[]>([])
 const currentFile = ref<FileItem | null>(null)
 const markdown = ref('')
@@ -199,9 +250,9 @@ const editorLayout = ref<EditorLayoutMode>(loadEditorLayout())
 const currentLine = ref(1)
 const currentColumn = ref(1)
 const showSettings = ref(false)
-const fileTabsRef = ref<HTMLElement | null>(null)
-const tabsBarWidth = ref(160)
-let tabsResizeObserver: ResizeObserver | null = null
+const editorContentRef = ref<HTMLElement | null>(null)
+const toolbarHostRef = ref<HTMLElement | null>(null)
+let toolbarObserver: MutationObserver | null = null
 const externalChangePaths = ref<string[]>([])
 const watchSuppressUntil = new Map<string, number>()
 let unlistenFileChanged: UnlistenFn | null = null
@@ -223,20 +274,50 @@ const clearExternalChange = (filePath: string) => {
 const currentFilePath = computed(() => currentFile.value?.path ?? '')
 const showUnifiedHeader = computed(() => files.value.length > 0 && !!currentFile.value)
 
-const updateTabsBarWidth = () => {
-  if (fileTabsRef.value) {
-    tabsBarWidth.value = Math.ceil(fileTabsRef.value.getBoundingClientRect().width)
-  }
+const resolvedSidebarBtnTop = computed(() => {
+  void appBodyHeight.value
+  if (sidebarBtnTop.value !== null) return sidebarBtnTop.value
+  return getCenteredSidebarBtnTop()
+})
+
+const sidebarToggleBtnStyle = computed(() => ({
+  top: `${resolvedSidebarBtnTop.value}px`,
+  left: sidebarCollapsed.value ? '0px' : `${SIDEBAR_WIDTH}px`,
+}))
+
+const mountToolbarToHeader = () => {
+  if (!showUnifiedHeader.value) return
+
+  const host = toolbarHostRef.value
+  const root = editorContentRef.value
+  if (!host || !root) return
+
+  const toolbar = root.querySelector('.bytemd .bytemd-toolbar') as HTMLElement | null
+  if (!toolbar || toolbar.parentElement === host) return
+
+  host.querySelectorAll('.bytemd-toolbar').forEach((node) => node.remove())
+  host.appendChild(toolbar)
 }
 
-const setupTabsResizeObserver = () => {
-  tabsResizeObserver?.disconnect()
+const scheduleToolbarMount = () => {
   nextTick(() => {
-    if (!fileTabsRef.value) return
-    tabsResizeObserver = new ResizeObserver(updateTabsBarWidth)
-    tabsResizeObserver.observe(fileTabsRef.value)
-    updateTabsBarWidth()
+    mountToolbarToHeader()
+    requestAnimationFrame(mountToolbarToHeader)
+    for (const delay of [50, 150, 300, 600, 1200]) {
+      setTimeout(mountToolbarToHeader, delay)
+    }
   })
+}
+
+const setupToolbarObserver = () => {
+  toolbarObserver?.disconnect()
+  toolbarObserver = null
+
+  const root = editorContentRef.value
+  if (!root) return
+
+  toolbarObserver = new MutationObserver(() => mountToolbarToHeader())
+  toolbarObserver.observe(root, { childList: true, subtree: true })
 }
 
 const wordCount = computed(() => {
@@ -407,6 +488,52 @@ const openSettings = () => {
 const toggleSidebar = () => {
   sidebarCollapsed.value = !sidebarCollapsed.value
   localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed.value))
+}
+
+const clampSidebarBtnTop = (top: number) => {
+  const maxTop = Math.max(0, (appBodyRef.value?.clientHeight ?? 600) - SIDEBAR_BTN_HEIGHT)
+  return Math.max(0, Math.min(maxTop, top))
+}
+
+const onSidebarBtnPointerDown = (event: PointerEvent) => {
+  sidebarBtnDidDrag = false
+  isDraggingSidebarBtn.value = true
+  sidebarBtnDragStartY = event.clientY
+  sidebarBtnDragStartTop = resolvedSidebarBtnTop.value
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+}
+
+const onSidebarBtnPointerMove = (event: PointerEvent) => {
+  if (!isDraggingSidebarBtn.value) return
+  const deltaY = event.clientY - sidebarBtnDragStartY
+  if (Math.abs(deltaY) > 3) sidebarBtnDidDrag = true
+  sidebarBtnTop.value = clampSidebarBtnTop(sidebarBtnDragStartTop + deltaY)
+}
+
+const onSidebarBtnPointerUp = (event: PointerEvent) => {
+  if (!isDraggingSidebarBtn.value) return
+  isDraggingSidebarBtn.value = false
+  ;(event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId)
+  if (sidebarBtnTop.value !== null) {
+    localStorage.setItem(SIDEBAR_BTN_TOP_KEY, String(sidebarBtnTop.value))
+  }
+}
+
+const onSidebarBtnClick = () => {
+  if (sidebarBtnDidDrag) return
+  toggleSidebar()
+}
+
+const clampSidebarBtnPosition = () => {
+  appBodyHeight.value = appBodyRef.value?.clientHeight ?? 0
+  if (sidebarBtnTop.value !== null) {
+    sidebarBtnTop.value = clampSidebarBtnTop(sidebarBtnTop.value)
+  }
+}
+
+const toggleToolbar = () => {
+  toolbarCollapsed.value = !toolbarCollapsed.value
+  localStorage.setItem(TOOLBAR_STORAGE_KEY, String(toolbarCollapsed.value))
 }
 
 const togglePreview = () => {
@@ -777,7 +904,11 @@ onMounted(async () => {
   }
 
   await syncDiskFileWatches()
-  setupTabsResizeObserver()
+  scheduleToolbarMount()
+  nextTick(setupToolbarObserver)
+
+  clampSidebarBtnPosition()
+  window.addEventListener('resize', clampSidebarBtnPosition)
 })
 
 watch(
@@ -787,19 +918,29 @@ watch(
   }
 )
 
-watch(showUnifiedHeader, () => {
-  setupTabsResizeObserver()
+watch(showUnifiedHeader, (visible) => {
+  if (visible) {
+    scheduleToolbarMount()
+    nextTick(setupToolbarObserver)
+  } else {
+    toolbarObserver?.disconnect()
+    toolbarObserver = null
+  }
 })
 
-watch(editorLayout, () => {
-  nextTick(updateTabsBarWidth)
+watch(editorLayout, scheduleToolbarMount)
+
+watch(currentFilePath, () => {
+  scheduleToolbarMount()
+  nextTick(setupToolbarObserver)
 })
 
 // 清理事件监听器
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown, true)
+  window.removeEventListener('resize', clampSidebarBtnPosition)
   unlistenFileChanged?.()
-  tabsResizeObserver?.disconnect()
+  toolbarObserver?.disconnect()
   void invoke('sync_file_watches', { paths: [] })
 })
 </script>
@@ -824,45 +965,48 @@ onUnmounted(() => {
 
 /* 文件标签栏 */
 .file-tabs {
-  background: var(--bg-secondary); /* 与知识库背景色一致 */
+  background: var(--tab-bar-bg);
   border-bottom: 1px solid var(--border-color);
-  padding: 0 12px; /* 与文件树头部保持一致的内边距 */
+  padding: 0 8px;
   display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 35px; /* 确保固定高度与文件树头部一致 */
+  align-items: flex-end;
+  gap: 0;
+  height: 35px;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
   box-sizing: border-box;
-  position: relative; /* 使position: sticky生效的父元素 */
-  flex-shrink: 0; /* 防止在flex布局中被压缩 */
-  z-index: 10; /* 确保在编辑器上方 */
+  position: relative;
+  flex-shrink: 0;
+  z-index: 10;
 }
 
 .file-tab {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 8px;
-  background: var(--bg-secondary);
-  border-radius: 4px;
+  padding: 0 12px;
+  height: 100%;
+  background: transparent;
+  border-radius: 0;
   cursor: pointer;
   font-size: 12px;
-  transition: all 0.2s ease;
-  border: 1px solid transparent;
-  flex-shrink: 0; /* 防止标签被压缩 */
+  color: var(--tab-inactive-fg);
+  transition: background-color 0.15s ease, color 0.15s ease;
+  border: none;
+  border-top: 2px solid transparent;
+  flex-shrink: 0;
 }
 
 .file-tab:hover {
   background: var(--hover-bg);
-  border-color: var(--border-color);
+  color: var(--tab-active-fg);
 }
 
 .file-tab.active {
-  background: var(--accent-color);
-  color: var(--bg-primary);
-  border-color: var(--accent-color);
+  background: var(--tab-active-bg);
+  color: var(--tab-active-fg);
+  border-top-color: var(--tab-active-border);
 }
 
 .tab-file-icon {
@@ -871,7 +1015,7 @@ onUnmounted(() => {
 }
 
 .file-tab.active .tab-file-icon {
-  color: var(--bg-primary);
+  color: var(--tab-active-fg);
 }
 
 .tab-name {
@@ -910,7 +1054,7 @@ onUnmounted(() => {
 }
 
 .file-tab.active .tab-close {
-  color: var(--bg-primary);
+  color: var(--tab-inactive-fg);
   opacity: 1;
 }
 
@@ -928,26 +1072,45 @@ onUnmounted(() => {
   position: relative;
 }
 
-.sidebar-expand-btn {
+.sidebar-toggle-btn {
   position: absolute;
-  left: 0;
-  top: 8px;
-  z-index: 20;
+  z-index: 30;
   width: 20px;
   height: 48px;
   border: 1px solid var(--border-color);
-  border-left: none;
-  border-radius: 0 6px 6px 0;
   background: var(--bg-secondary);
   color: var(--text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  padding: 0;
+  transition:
+    left 0.2s ease,
+    background-color 0.2s ease,
+    color 0.2s ease;
 }
 
-.sidebar-expand-btn:hover {
+.sidebar-toggle-btn.is-collapsed {
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  transform: none;
+}
+
+.sidebar-toggle-btn.is-expanded {
+  border-right: none;
+  border-radius: 6px 0 0 6px;
+  transform: translateX(-100%);
+}
+
+.sidebar-toggle-btn.dragging {
+  cursor: grabbing;
+  transition: left 0.2s ease;
+}
+
+.sidebar-toggle-btn:hover {
   background: var(--hover-bg);
   color: var(--text-primary);
 }
@@ -961,50 +1124,80 @@ onUnmounted(() => {
 }
 
 .editor-unified-header.is-merged {
+  display: flex;
+  align-items: stretch;
   height: 35px;
   flex-shrink: 0;
-  position: relative;
-  z-index: 20;
-  background: var(--bg-secondary);
+  background: var(--tab-bar-bg);
   border-bottom: 1px solid var(--border-color);
-  overflow: visible;
 }
 
 .editor-unified-header.is-merged .file-tabs {
-  max-width: 48%;
+  flex: 0 1 auto;
+  max-width: 45%;
+  min-width: 0;
   height: 100%;
   border-bottom: none;
   background: transparent;
   padding-right: 4px;
 }
 
+.toolbar-host {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.toolbar-host.collapsed {
+  flex: 0;
+}
+
+.toolbar-toggle-btn {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.toolbar-toggle-btn:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.toolbar-host.collapsed :deep(.bytemd-toolbar) {
+  display: none !important;
+}
+
+.toolbar-host :deep(.bytemd-toolbar) {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  border-bottom: none !important;
+  background: transparent !important;
+  padding: 0 8px !important;
+  min-height: 35px !important;
+  height: 35px !important;
+}
+
+.toolbar-host :deep(.bytemd-toolbar-left),
+.toolbar-host :deep(.bytemd-toolbar-right) {
+  flex-wrap: nowrap;
+}
+
 .editor-content {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-}
-
-.editor-content.with-unified-header {
-  position: relative;
-}
-
-.editor-content.with-unified-header :deep(.bytemd-toolbar) {
-  position: absolute;
-  top: -35px;
-  left: var(--tabs-width, 160px);
-  right: 0;
-  height: 35px !important;
-  min-height: 35px !important;
-  border-bottom: none !important;
-  background: var(--bg-secondary) !important;
-  z-index: 15;
-  padding: 0 8px !important;
-  box-sizing: border-box;
-}
-
-.editor-content.with-unified-header :deep(.bytemd-toolbar-left),
-.editor-content.with-unified-header :deep(.bytemd-toolbar-right) {
-  flex-wrap: nowrap;
 }
 
 /* 添加编辑器包装器样式 */
@@ -1042,9 +1235,10 @@ onUnmounted(() => {
 }
 
 .app-footer {
-  height: 24px;
-  background: var(--accent-color);
-  color: var(--bg-primary);
+  height: 22px;
+  background: var(--status-bar-bg);
+  color: var(--status-bar-fg);
+  border-top: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1081,16 +1275,18 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-secondary);
+  color: var(--status-bar-fg);
   cursor: pointer;
   transition: all 0.2s ease;
   margin-right: 8px;
+  opacity: 0.85;
 }
 
 .settings-btn:hover,
 .theme-toggle-btn:hover {
   background: var(--hover-bg);
   color: var(--text-primary);
+  opacity: 1;
 }
 
 .settings-btn {

@@ -1,15 +1,6 @@
 <template>
   <div class="file-tree" :class="{ collapsed }" :aria-hidden="collapsed">
     <div class="file-tree-header">
-      <button
-        class="action-btn collapse-btn"
-        @click="$emit('toggleCollapse')"
-        title="隐藏侧边栏 (视图菜单 Ctrl+B)"
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-          <polyline points="15,6 9,12 15,18" stroke="currentColor" stroke-width="2"/>
-        </svg>
-      </button>
       <div class="header-title">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
           <path d="M3 3h7l2 3h9v12H3V3z" stroke="currentColor" stroke-width="2" fill="none"/>
@@ -71,7 +62,6 @@ defineEmits<{
   newFile: []
   openFolder: []
   closeFile: [file: FileItem]
-  toggleCollapse: []
 }>()
 </script>
 
@@ -111,10 +101,6 @@ defineEmits<{
   flex-shrink: 0;
   background: var(--bg-secondary);
   box-sizing: border-box;
-}
-
-.collapse-btn {
-  margin-right: 4px;
 }
 
 .header-title {
@@ -175,8 +161,8 @@ defineEmits<{
 }
 
 .file-item.active {
-  background: var(--accent-color);
-  color: var(--bg-primary);
+  background: var(--list-active-bg);
+  color: var(--list-active-fg);
 }
 
 .file-icon {

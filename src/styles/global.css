@@ -2,14 +2,23 @@
 :root {
   /* 浅色主题 */
   --bg-primary: #ffffff;
-  --bg-secondary: #f8f9fa;
-  --bg-tertiary: #e9ecef;
-  --text-primary: #212529;
-  --text-secondary: #6c757d;
+  --bg-secondary: #f3f3f3;
+  --bg-tertiary: #e8e8e8;
+  --text-primary: #333333;
+  --text-secondary: #616161;
   --text-tertiary: #adb5bd;
   --border-color: #dee2e6;
-  --accent-color: #DFDFE0;
-  --hover-bg: #f8f9fa;
+  --accent-color: #006ab1;
+  --hover-bg: #f3f3f3;
+  --tab-bar-bg: #ececec;
+  --tab-active-bg: #ffffff;
+  --tab-active-fg: #333333;
+  --tab-inactive-fg: #616161;
+  --tab-active-border: #006ab1;
+  --status-bar-bg: #f3f3f3;
+  --status-bar-fg: #616161;
+  --list-active-bg: #e8e8e8;
+  --list-active-fg: #333333;
   --success-color: #198754;
   --warning-color: #ffc107;
   --danger-color: #dc3545;
@@ -39,8 +48,17 @@
   --text-secondary: #969696;
   --text-tertiary: #6a6a6a;
   --border-color: #3e3e42;
-  --accent-color: #DFDFE0;
+  --accent-color: #3794ff;
   --hover-bg: #2a2d2e;
+  --tab-bar-bg: #252526;
+  --tab-active-bg: #1e1e1e;
+  --tab-active-fg: #e7e7e7;
+  --tab-inactive-fg: #969696;
+  --tab-active-border: #007acc;
+  --status-bar-bg: #181818;
+  --status-bar-fg: #cccccc;
+  --list-active-bg: #37373d;
+  --list-active-fg: #cccccc;
   --success-color: #28a745;
   --warning-color: #ffc107;
   --danger-color: #dc3545;
@@ -121,6 +139,23 @@ html, body {
   background: var(--editor-bg) !important;
   color: var(--editor-text) !important;
   /* 移除 overflow: hidden，让内部组件处理滚动 */
+}
+
+/* 顶栏合并：工具栏 DOM 移入 .toolbar-host 后的样式 */
+.toolbar-host .bytemd-toolbar {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  border-bottom: none !important;
+  background: transparent !important;
+  padding: 0 8px !important;
+  min-height: 35px !important;
+  height: 35px !important;
+}
+
+.toolbar-host .bytemd-toolbar-left,
+.toolbar-host .bytemd-toolbar-right {
+  flex-wrap: nowrap;
 }
 
 /* 保留ByteMD自带的工具栏，但调整样式 */
