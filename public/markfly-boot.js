@@ -15,12 +15,20 @@
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
   }
 
+  function stripFrontmatter(markdown) {
+    if (!/^\s*---\r?\n/.test(markdown)) return markdown
+    const match = markdown.match(/^\s*---\r?\n[\s\S]*?\r?\n---\r?\n?/)
+    if (!match) return markdown
+    return markdown.slice(match[0].length)
+  }
+
   function renderMarkdown(markdown) {
-    const lines = markdown.replace(/\r\n/g, '\n').split('\n')
+    const lines = stripFrontmatter(markdown).replace(/\r\n/g, '\n').split('\n')
     const html = []
     let inCode = false
     let codeLines = []
     let listType = ''
+    let tablePlaceholderShown = false
 
     const flushList = () => {
       if (listType) {
@@ -29,7 +37,20 @@
       }
     }
 
+    const isTableLine = (line) => {
+      const trimmed = line.trim()
+      return trimmed.startsWith('|') && trimmed.endsWith('|')
+    }
+
     for (const line of lines) {
+      if (isTableLine(line)) {
+        flushList()
+        if (!tablePlaceholderShown) {
+          html.push('<p class="markfly-boot-truncated"><em>表格正在加载完整预览…</em></p>')
+          tablePlaceholderShown = true
+        }
+        continue
+      }
       if (line.startsWith('```')) {
         flushList()
         if (!inCode) {
@@ -84,6 +105,27 @@
     return parts[parts.length - 1] || path
   }
 
+  function resolveBootDark() {
+    const mode = localStorage.getItem('theme-mode')
+    if (mode === 'dark') return true
+    if (mode === 'light') return false
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  }
+
+  function applyBootTheme(layer) {
+    const isDark = resolveBootDark()
+    document.documentElement.classList.toggle('boot-dark', isDark)
+    if (!layer) return
+    layer.style.background = isDark ? '#1e1e1e' : '#ffffff'
+    layer.style.color = isDark ? '#cccccc' : '#333333'
+    const header = layer.querySelector('.markfly-boot-header')
+    if (header) {
+      header.style.background = isDark ? '#252526' : '#ececec'
+      header.style.borderBottomColor = isDark ? '#3e3e42' : '#e5e5e5'
+      header.style.color = isDark ? '#cccccc' : '#333333'
+    }
+  }
+
   function ensureLayer() {
     let layer = document.getElementById('markfly-boot-layer')
     if (layer) return layer
@@ -94,6 +136,7 @@
       '<div class="markfly-boot-header"><span id="markfly-boot-tab"></span></div>' +
       '<div id="markfly-boot-content" class="markfly-boot-content markdown-body"></div>'
     document.body.appendChild(layer)
+    applyBootTheme(layer)
     return layer
   }
 
@@ -103,7 +146,11 @@
     const first = files[0]
     ensureLayer()
     document.getElementById('markfly-boot-tab').textContent = fileNameFromPath(first.path)
-    document.getElementById('markfly-boot-content').innerHTML = renderMarkdown(first.content || '')
+    let html = renderMarkdown(first.content || '')
+    if (first.truncated) {
+      html += '<p class="markfly-boot-truncated"><em>文档较长，正在加载完整内容…</em></p>'
+    }
+    document.getElementById('markfly-boot-content').innerHTML = html
   }
 
   window.__markflyApplyBoot = function (files) {
@@ -114,7 +161,10 @@
   window.__markflyHideBoot = function () {
     const layer = document.getElementById('markfly-boot-layer')
     if (layer) layer.remove()
+    document.documentElement.classList.remove('boot-dark')
   }
+
+  applyBootTheme(null)
 
   if (window.__MARKFLY_BOOT__ && window.__MARKFLY_BOOT__.length) {
     renderBoot(window.__MARKFLY_BOOT__)

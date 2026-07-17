@@ -371,3 +371,71 @@ html, body {
     font-size: 13px !important;
   }
 }
+
+/* 轻量预览（github-markdown-css 懒加载前的兜底样式） */
+.markfly-preview-viewer.markdown-body {
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.markfly-preview-viewer.markdown-body h1,
+.markfly-preview-viewer.markdown-body h2,
+.markfly-preview-viewer.markdown-body h3 {
+  margin: 1em 0 0.5em;
+  font-weight: 600;
+}
+
+.markfly-preview-viewer.markdown-body p,
+.markfly-preview-viewer.markdown-body ul,
+.markfly-preview-viewer.markdown-body ol,
+.markfly-preview-viewer.markdown-body pre {
+  margin: 0.5em 0;
+}
+
+.markfly-preview-viewer.markdown-body pre {
+  background: var(--code-bg);
+  padding: 12px;
+  overflow: auto;
+  border-radius: 6px;
+}
+
+.markfly-preview-viewer.markdown-body code {
+  background: var(--code-bg);
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+  font-family: Consolas, Monaco, monospace;
+}
+
+.markfly-preview-viewer.markdown-body a {
+  color: var(--accent-color);
+}
+
+.preview-loading-hint {
+  color: var(--text-secondary);
+  padding: 16px 0;
+  font-size: 13px;
+}
+
+.markfly-preview-viewer.markdown-body table {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  overflow: auto;
+}
+
+.markfly-preview-viewer.markdown-body th,
+.markfly-preview-viewer.markdown-body td {
+  border: 1px solid var(--border-color);
+  padding: 6px 10px;
+  vertical-align: top;
+}
+
+.markfly-preview-viewer.markdown-body th {
+  background: var(--bg-secondary);
+  font-weight: 600;
+}
+
+.markfly-preview-viewer.markdown-body tr:nth-child(even) td {
+  background: var(--bg-tertiary);
+}

@@ -21,6 +21,15 @@ struct PendingOpenFile {
 
 struct PendingOpenFiles(Mutex<Vec<PendingOpenFile>>);
 
+const BOOT_PREVIEW_MAX_BYTES: usize = 512 * 1024;
+
+#[derive(serde::Serialize)]
+struct BootPreviewFile {
+    path: String,
+    content: String,
+    truncated: bool,
+}
+
 fn collect_paths_from_args<I>(args: I) -> Vec<PathBuf>
 where
     I: IntoIterator<Item = String>,
@@ -129,28 +138,154 @@ fn read_initial_boot_files() -> Vec<PendingOpenFile> {
     }
 }
 
-fn inject_boot_preview(webview: &Webview) {
-    let boot: Vec<PendingOpenFile> = {
-        let state = webview.app_handle().state::<PendingOpenFiles>();
-        let pending = state.0.lock().unwrap();
-        pending.clone()
-    };
+fn boot_preview_files(boot: &[PendingOpenFile]) -> Vec<BootPreviewFile> {
+    boot
+        .iter()
+        .map(|item| {
+            let truncated = item.content.len() > BOOT_PREVIEW_MAX_BYTES;
+            let content = if truncated {
+                item.content.chars().take(BOOT_PREVIEW_MAX_BYTES).collect()
+            } else {
+                item.content.clone()
+            };
+            BootPreviewFile {
+                path: item.path.clone(),
+                content,
+                truncated,
+            }
+        })
+        .collect()
+}
 
+fn pending_boot_snapshot(webview: &Webview) -> Vec<PendingOpenFile> {
+    let state = webview.app_handle().state::<PendingOpenFiles>();
+    let pending = state.0.lock().unwrap();
+    pending.clone()
+}
+
+fn inject_boot_data(webview: &Webview) {
+    let boot = pending_boot_snapshot(webview);
     if boot.is_empty() {
         return;
     }
 
-    if let Ok(json) = serde_json::to_string(&boot) {
+    if let Ok(json) = serde_json::to_string(&boot_preview_files(&boot)) {
+        let _ = webview.eval(format!(
+            "(function(d){{window.__MARKFLY_BOOT__=d;window.__markflyApplyBoot&&window.__markflyApplyBoot(d);}})({json});"
+        ));
+    }
+}
+
+fn inject_boot_preview(webview: &Webview) {
+    let boot = pending_boot_snapshot(webview);
+    if boot.is_empty() {
+        return;
+    }
+
+    if let Ok(json) = serde_json::to_string(&boot_preview_files(&boot)) {
         let _ = webview.eval(format!(
             "window.__markflyApplyBoot && window.__markflyApplyBoot({json});"
         ));
     }
 }
 
+fn has_pending_boot(webview: &Webview) -> bool {
+    !pending_boot_snapshot(webview).is_empty()
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
     }
+}
+
+fn setup_app_menus(app: &tauri::AppHandle) -> tauri::Result<()> {
+    #[cfg(target_os = "macos")]
+    let app_menu = SubmenuBuilder::new(app, "MarkFly")
+        .item(&PredefinedMenuItem::about(app, Some("关于 MarkFly"), None)?)
+        .separator()
+        .item(&PredefinedMenuItem::services(app, Some("服务"))?)
+        .separator()
+        .item(&PredefinedMenuItem::hide(app, Some("隐藏 MarkFly"))?)
+        .item(&PredefinedMenuItem::hide_others(app, Some("隐藏其他"))?)
+        .item(&PredefinedMenuItem::show_all(app, Some("全部显示"))?)
+        .separator()
+        .item(&PredefinedMenuItem::quit(app, Some("退出"))?)
+        .build()?;
+
+    let file_menu = SubmenuBuilder::new(app, "文件")
+        .text("new-file", "新建文件")
+        .text("open-file", "打开文件...")
+        .text("save-file", "保存文件")
+        .text("save-file-as", "另存为...")
+        .separator()
+        .text("exit", "退出")
+        .build()?;
+
+    let edit_menu = SubmenuBuilder::new(app, "编辑")
+        .item(&PredefinedMenuItem::undo(app, Some("撤销"))?)
+        .item(&PredefinedMenuItem::redo(app, Some("重做"))?)
+        .separator()
+        .item(&PredefinedMenuItem::cut(app, Some("剪切"))?)
+        .item(&PredefinedMenuItem::copy(app, Some("复制"))?)
+        .item(&PredefinedMenuItem::paste(app, Some("粘贴"))?)
+        .build()?;
+
+    let toggle_sidebar = MenuItemBuilder::with_id("toggle-sidebar", "显示/隐藏侧边栏")
+        .accelerator("CmdOrCtrl+B")
+        .build(app)?;
+
+    let view_menu = SubmenuBuilder::new(app, "视图")
+        .item(&toggle_sidebar)
+        .separator()
+        .text("toggle-preview", "切换预览模式")
+        .text("toggle-theme", "切换主题")
+        .build()?;
+
+    let help_menu = SubmenuBuilder::new(app, "帮助")
+        .text("about", "关于 MarkFly")
+        .build()?;
+
+    #[cfg(target_os = "macos")]
+    {
+        let menu = MenuBuilder::new(app)
+            .item(&app_menu)
+            .item(&file_menu)
+            .item(&edit_menu)
+            .item(&view_menu)
+            .item(&help_menu)
+            .build()?;
+        menu.set_as_app_menu()?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let menu = MenuBuilder::new(app)
+            .item(&file_menu)
+            .item(&edit_menu)
+            .item(&view_menu)
+            .item(&help_menu)
+            .build()?;
+        if let Some(window) = app.get_webview_window("main") {
+            window.set_menu(menu)?;
+        }
+    }
+
+    app.on_menu_event(|app_handle, event| {
+        let event_id = event.id().0.as_str();
+        match event_id {
+            "new-file" | "open-file" | "save-file" | "save-file-as" | "toggle-sidebar"
+            | "toggle-preview" | "toggle-theme" => {
+                let _ = app_handle.emit("menu", event_id);
+            }
+            "exit" | "quit" => {
+                app_handle.exit(0);
+            }
+            _ => {}
+        }
+    });
+
+    Ok(())
 }
 
 fn focus_main_window(app: &tauri::AppHandle) {
@@ -202,14 +337,20 @@ pub fn run() {
 
     builder
         .on_page_load(|webview: &Webview, payload| {
-            if payload.event() != PageLoadEvent::Finished {
-                return;
+            match payload.event() {
+                PageLoadEvent::Started => {
+                    inject_boot_data(webview);
+                    if has_pending_boot(webview) {
+                        show_main_window(webview.app_handle());
+                    }
+                }
+                PageLoadEvent::Finished => {
+                    inject_boot_preview(webview);
+                    show_main_window(webview.app_handle());
+                }
             }
-            inject_boot_preview(webview);
-            show_main_window(webview.app_handle());
         })
         .setup(|app| {
-            // 尽早读取待打开文件（含内容），供启动预览层使用
             #[cfg(any(windows, target_os = "linux"))]
             {
                 let _ = store_pending_open_files(
@@ -218,119 +359,24 @@ pub fn run() {
                 );
             }
 
-            println!("开始创建菜单...");
-
-            // 在 macOS 上，第一个菜单会自动成为应用菜单，所以我们创建一个空的应用菜单
-            #[cfg(target_os = "macos")]
-            let app_menu = SubmenuBuilder::new(app, "MarkFly")
-                .item(&PredefinedMenuItem::about(app, Some("关于 MarkFly"), None)?)
-                .separator()
-                .item(&PredefinedMenuItem::services(app, Some("服务"))?)
-                .separator()
-                .item(&PredefinedMenuItem::hide(app, Some("隐藏 MarkFly"))?)
-                .item(&PredefinedMenuItem::hide_others(app, Some("隐藏其他"))?)
-                .item(&PredefinedMenuItem::show_all(app, Some("全部显示"))?)
-                .separator()
-                .item(&PredefinedMenuItem::quit(app, Some("退出"))?)
-                .build()?;
-
-            // 创建文件菜单
-            let file_menu = SubmenuBuilder::new(app, "文件")
-                .text("new-file", "新建文件")
-                .text("open-file", "打开文件...")
-                .text("save-file", "保存文件")
-                .text("save-file-as", "另存为...")
-                .separator()
-                .text("exit", "退出")
-                .build()?;
-            println!("文件菜单创建完成");
-
-            // 创建编辑菜单，使用预定义项
-            let edit_menu = SubmenuBuilder::new(app, "编辑")
-                .item(&PredefinedMenuItem::undo(app, Some("撤销"))?)
-                .item(&PredefinedMenuItem::redo(app, Some("重做"))?)
-                .separator()
-                .item(&PredefinedMenuItem::cut(app, Some("剪切"))?)
-                .item(&PredefinedMenuItem::copy(app, Some("复制"))?)
-                .item(&PredefinedMenuItem::paste(app, Some("粘贴"))?)
-                .build()?;
-            println!("编辑菜单创建完成");
-
-            let toggle_sidebar = MenuItemBuilder::with_id("toggle-sidebar", "显示/隐藏侧边栏")
-                .accelerator("CmdOrCtrl+B")
-                .build(app)?;
-
-            let view_menu = SubmenuBuilder::new(app, "视图")
-                .item(&toggle_sidebar)
-                .separator()
-                .text("toggle-preview", "切换预览模式")
-                .text("toggle-theme", "切换主题")
-                .build()?;
-            println!("视图菜单创建完成");
-
-            let help_menu = SubmenuBuilder::new(app, "帮助")
-                .text("about", "关于 MarkFly")
-                .build()?;
-            println!("帮助菜单创建完成");
-
-            // 在 macOS 上使用 set_as_app_menu，在其他平台上使用 window.set_menu
-            #[cfg(target_os = "macos")]
-            {
-                let menu = MenuBuilder::new(app)
-                    .item(&app_menu) // 应用菜单作为第一个菜单
-                    .item(&file_menu)
-                    .item(&edit_menu)
-                    .item(&view_menu)
-                    .item(&help_menu)
-                    .build()?;
-                menu.set_as_app_menu()?;
-                println!("macOS 应用菜单设置完成");
-            }
-
-            #[cfg(not(target_os = "macos"))]
-            {
-                let menu = MenuBuilder::new(app)
-                    .item(&file_menu)
-                    .item(&edit_menu)
-                    .item(&view_menu)
-                    .item(&help_menu)
-                    .build()?;
-                let window = app.get_webview_window("main").unwrap();
-                window.set_menu(menu)?;
-                println!("窗口菜单设置完成");
-            }
-
-            // 监听菜单事件
-            app.on_menu_event(move |app_handle, event| {
-                let event_id = event.id().0.as_str();
-                println!("收到菜单事件: {}", event_id);
-                match event_id {
-                    "new-file" | "open-file" | "save-file" | "save-file-as" | "toggle-sidebar"
-                    | "toggle-preview" | "toggle-theme" => {
-                        // 发送事件到前端
-                        let _ = app_handle.emit("menu", event_id);
-                        println!("发送菜单事件到前端: {}", event_id);
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                let menu_handle = app_handle.clone();
+                let _ = app_handle.run_on_main_thread(move || {
+                    if let Err(error) = setup_app_menus(&menu_handle) {
+                        eprintln!("菜单创建失败: {error}");
                     }
-                    "exit" | "quit" => {
-                        println!("退出应用");
-                        app_handle.exit(0);
-                    }
-                    "about" => {
-                        println!("关于 MarkFly");
-                    }
-                    _ => {
-                        println!("未知菜单事件: {}", event_id);
-                    }
-                }
+                });
             });
 
-            // 应用启动时的初始化逻辑
             #[cfg(debug_assertions)]
             {
-                let window = app.get_webview_window("main").unwrap();
-                window.open_devtools();
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.open_devtools();
+                }
             }
-            println!("应用初始化完成");
+
             Ok(())
         })
         .build(tauri::generate_context!())

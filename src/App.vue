@@ -4,6 +4,7 @@
     <div class="app-body" ref="appBodyRef">
       <!-- 左侧文件树 -->
       <FileTree 
+        v-if="showDeferredChrome"
         :files="files"
         :activeFile="currentFilePath"
         :collapsed="sidebarCollapsed"
@@ -178,7 +179,7 @@
     </div>
 
     <!-- 状态栏（合并 ByteMD 内置状态，避免双行重复） -->
-    <div class="app-footer">
+    <div class="app-footer" v-if="showDeferredChrome">
       <div class="footer-left">
         <button class="settings-btn" @click="openSettings" title="设置">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
@@ -224,21 +225,26 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick, shallowRef, defineAsyncComponent, type Component } from 'vue'
 const FileTree = defineAsyncComponent(() => import('./components/FileTree.vue'))
 const SettingsPanel = defineAsyncComponent(() => import('./components/SettingsPanel.vue'))
-import { sampleFiles, type FileItem } from './data/sampleFiles'
+import type { FileItem } from './data/sampleFiles'
 import { useThemeStore } from './stores/theme'
-import { fastMarkdownToHtml } from './utils/fastPreview'
+import { lightMarkdownToHtml } from './utils/lightMarkdown'
+import { needsFullPreview, stripFrontmatter } from './utils/markdownPreview'
+import {
+  tauriInvoke,
+  tauriListen,
+  tauriReadTextFile,
+  tauriWriteTextFile,
+  tauriOpenFile,
+  tauriSaveFile,
+  tauriAsk,
+} from './utils/tauriBridge'
 
 import type { BytemdPlugin } from 'bytemd'
-
-// 导入 Tauri 相关模块
-import { open, save, ask } from '@tauri-apps/plugin-dialog'
-import { writeTextFile, readTextFile } from '@tauri-apps/plugin-fs'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { invoke } from '@tauri-apps/api/core'
 
 type PendingOpenFile = {
   path: string
   content: string
+  truncated?: boolean
 }
 
 declare global {
@@ -253,7 +259,7 @@ const readPendingBootstrap = (): Promise<PendingOpenFile[]> => {
   if (Array.isArray(boot) && boot.length > 0) {
     return Promise.resolve(boot)
   }
-  return invoke<PendingOpenFile[]>('get_pending_open_files').catch(() => [])
+  return tauriInvoke<PendingOpenFile[]>('get_pending_open_files').catch(() => [])
 }
 
 // 应用启动后立即拉取待打开文件（与 WebView 初始化并行）
@@ -268,6 +274,7 @@ const ensureEditorComponent = async () => {
 
   editorComponentLoading = (async () => {
     const mod = await import('@bytemd/vue-next')
+    await import('bytemd/dist/index.css')
     EditorComponent.value = mod.Editor
   })()
 
@@ -310,6 +317,7 @@ const getCenteredSidebarBtnTop = () => {
 // 响应式数据
 const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_STORAGE_KEY) !== 'false')
 const isBootstrapping = ref(true)
+const showDeferredChrome = ref(false)
 const sidebarBtnTop = ref<number | null>(loadSidebarBtnTop())
 const appBodyHeight = ref(0)
 const isDraggingSidebarBtn = ref(false)
@@ -334,7 +342,7 @@ let previewViewerEffectCleanups: Array<() => void> = []
 let bytemdGetProcessor: ((options: { plugins: BytemdPlugin[] }) => { processSync: (value: string) => { toString: () => string } }) | null = null
 const externalChangePaths = ref<string[]>([])
 const watchSuppressUntil = new Map<string, number>()
-let unlistenFileChanged: UnlistenFn | null = null
+let unlistenFileChanged: (() => void) | null = null
 let reloadPromptOpen = false
 
 const markExternalChange = (filePath: string) => {
@@ -417,13 +425,14 @@ const lineCount = computed(() => {
 
 // ByteMD 插件：首屏为空，gfm/highlight/mediumZoom/math/mermaid 均懒加载
 const plugins = ref<BytemdPlugin[]>([])
+const previewEngineReady = ref(false)
 let mediumPluginsLoaded = false
 let mediumPluginsLoading: Promise<void> | null = null
 let heavyPluginsLoaded = false
 let heavyPluginsLoading: Promise<void> | null = null
 let fullPreviewProcessorReady = false
 
-const needsMediumPlugins = (content: string) => /```/.test(content)
+const needsMediumPlugins = (content: string) => needsFullPreview(content)
 
 const needsHeavyPlugins = (content: string) => {
   if (!content) return false
@@ -454,6 +463,7 @@ const loadMediumPlugins = async () => {
     ])
     plugins.value = [gfm(), highlight(), mediumZoom()]
     mediumPluginsLoaded = true
+    previewEngineReady.value = true
   })()
 
   return mediumPluginsLoading
@@ -479,7 +489,7 @@ const loadHeavyPlugins = async () => {
 
 const scheduleMediumPluginLoad = (content = markdown.value) => {
   if (mediumPluginsLoaded || mediumPluginsLoading) return
-  if (needsMediumPlugins(content)) {
+  if (editorLayout.value === 'preview-only' || needsMediumPlugins(content)) {
     void loadMediumPlugins()
     return
   }
@@ -489,6 +499,12 @@ const scheduleMediumPluginLoad = (content = markdown.value) => {
   } else {
     setTimeout(run, 1000)
   }
+}
+
+const ensurePreviewPipeline = async () => {
+  if (editorLayout.value !== 'preview-only') return
+  await loadMediumPlugins()
+  scheduleHeavyPluginLoad(markdown.value)
 }
 
 const scheduleHeavyPluginLoad = (content = markdown.value) => {
@@ -505,11 +521,21 @@ const scheduleHeavyPluginLoad = (content = markdown.value) => {
   }
 }
 
+const previewSource = computed(() => stripFrontmatter(markdown.value))
+
+const previewWaitingForPipeline = computed(
+  () => usePreviewViewer.value && needsFullPreview(markdown.value) && !previewEngineReady.value
+)
+
 const previewHtml = computed(() => {
-  if (fullPreviewProcessorReady && bytemdGetProcessor) {
-    return bytemdGetProcessor({ plugins: plugins.value }).processSync(markdown.value).toString()
+  const source = previewSource.value
+  if (previewEngineReady.value && bytemdGetProcessor && plugins.value.length > 0) {
+    return bytemdGetProcessor({ plugins: plugins.value }).processSync(source).toString()
   }
-  return fastMarkdownToHtml(markdown.value)
+  if (needsFullPreview(markdown.value)) {
+    return '<p class="preview-loading-hint">正在加载完整预览…</p>'
+  }
+  return lightMarkdownToHtml(source)
 })
 
 const applyPreviewViewerEffects = () => {
@@ -517,9 +543,9 @@ const applyPreviewViewerEffects = () => {
   previewViewerEffectCleanups = []
 
   const body = previewBodyRef.value
-  if (!body || !fullPreviewProcessorReady || !bytemdGetProcessor) return
+  if (!body || !previewEngineReady.value || !bytemdGetProcessor) return
 
-  const file = bytemdGetProcessor({ plugins: plugins.value }).processSync(markdown.value)
+  const file = bytemdGetProcessor({ plugins: plugins.value }).processSync(previewSource.value)
   for (const plugin of plugins.value) {
     const cleanup = plugin.viewerEffect?.({ markdownBody: body, file } as never)
     if (typeof cleanup === 'function') {
@@ -583,6 +609,10 @@ const selectFile = async (file: FileItem) => {
   markdown.value = file.content
   isModified.value = false
   void checkPendingExternalChange(file)
+  if (needsFullPreview(file.content)) {
+    await loadMediumPlugins()
+  }
+  await ensurePreviewPipeline()
 }
 
 const createNewFile = () => {
@@ -783,14 +813,14 @@ const isWatchSuppressed = (filePath: string) => {
 const syncDiskFileWatches = async () => {
   const paths = files.value.map((file) => file.path).filter(isDiskFilePath)
   try {
-    await invoke('sync_file_watches', { paths })
+    await tauriInvoke('sync_file_watches', { paths })
   } catch (error) {
     console.error('同步文件监听失败:', error)
   }
 }
 
 const reloadFileFromDisk = async (file: FileItem, newContent?: string) => {
-  const content = newContent ?? await readTextFile(file.path)
+  const content = newContent ?? await tauriReadTextFile(file.path)
   file.content = content
   clearExternalChange(file.path)
 
@@ -812,7 +842,7 @@ const promptReloadFile = async (file: FileItem, newContent: string) => {
       ? `「${file.name}」已在磁盘上被其他程序修改。\n\n是否重新加载？未保存的更改将会丢失。`
       : `「${file.name}」已在磁盘上被其他程序修改。\n\n是否重新加载？`
 
-    const reload = await ask(message, {
+    const reload = await tauriAsk(message, {
       title: 'MarkFly',
       kind: 'warning',
       okLabel: '重新加载',
@@ -841,7 +871,7 @@ const handleExternalFileChange = async (filePath: string) => {
 
   let newContent: string
   try {
-    newContent = await readTextFile(filePath)
+    newContent = await tauriReadTextFile(filePath)
   } catch (error) {
     console.error('读取外部变更失败:', error)
     return
@@ -865,7 +895,7 @@ const checkPendingExternalChange = async (file: FileItem) => {
 
   let newContent: string
   try {
-    newContent = await readTextFile(file.path)
+    newContent = await tauriReadTextFile(file.path)
   } catch (error) {
     console.error('读取外部变更失败:', error)
     return
@@ -880,11 +910,12 @@ const checkPendingExternalChange = async (file: FileItem) => {
   await promptReloadFile(file, newContent)
 }
 
-const loadWelcomeSample = () => {
+const loadWelcomeSample = async () => {
   if (files.value.length > 0) {
     return
   }
 
+  const { sampleFiles } = await import('./data/sampleFiles')
   files.value = [...sampleFiles]
   if (sampleFiles.length > 0) {
     selectFile(sampleFiles[0])
@@ -899,7 +930,7 @@ const openFileFromPath = async (filePath: string, preloadedContent?: string) => 
       return
     }
 
-    const content = preloadedContent ?? await readTextFile(filePath)
+    const content = preloadedContent ?? await tauriReadTextFile(filePath)
     const newFile: FileItem = {
       name: getFileNameFromPath(filePath),
       path: filePath,
@@ -908,8 +939,6 @@ const openFileFromPath = async (filePath: string, preloadedContent?: string) => 
 
     files.value.push(newFile)
     selectFile(newFile)
-    scheduleMediumPluginLoad(content)
-    scheduleHeavyPluginLoad(content)
   } catch (error) {
     console.error('打开文件失败:', error)
   }
@@ -939,20 +968,12 @@ const openFilePaths = async (items: PendingOpenFile[] | string[]) => {
     files.value.push(newFile)
     if (index === 0) selectFile(newFile)
   }
-
-  const firstContent = typeof items[0] === 'string'
-    ? undefined
-    : items[0].content
-  if (firstContent) {
-    scheduleMediumPluginLoad(firstContent)
-    scheduleHeavyPluginLoad(firstContent)
-  }
 }
 
 // 新增：打开本地 Markdown 文件
 const openLocalFile = async () => {
   try {
-    const selected = await open({
+    const selected = await tauriOpenFile({
       multiple: false,
       filters: [{
         name: 'Markdown Files',
@@ -976,13 +997,13 @@ const saveFileToLocal = async () => {
     // 如果文件已经有路径，直接保存
     if (currentFile.value.path && currentFile.value.path !== currentFile.value.name) {
       markFileSavedOnDisk(currentFile.value.path)
-      await writeTextFile(currentFile.value.path, markdown.value)
+      await tauriWriteTextFile(currentFile.value.path, markdown.value)
       currentFile.value.content = markdown.value
       isModified.value = false
       console.log('文件已保存:', currentFile.value.path)
     } else {
       // 弹出保存对话框
-      const filePath = await save({
+      const filePath = await tauriSaveFile({
         filters: [{
           name: 'Markdown Files',
           extensions: ['md']
@@ -991,7 +1012,7 @@ const saveFileToLocal = async () => {
       
       if (filePath) {
         markFileSavedOnDisk(filePath)
-        await writeTextFile(filePath, markdown.value)
+        await tauriWriteTextFile(filePath, markdown.value)
         currentFile.value.content = markdown.value
         // 更新文件路径
         currentFile.value.path = filePath
@@ -1015,7 +1036,7 @@ const saveFileAs = async () => {
       ? currentFile.value.path 
       : currentFile.value.name || '未命名.md'
       
-    const filePath = await save({
+    const filePath = await tauriSaveFile({
       defaultPath: defaultPath,
       filters: [{
         name: 'Markdown Files',
@@ -1025,7 +1046,7 @@ const saveFileAs = async () => {
     
     if (filePath) {
       markFileSavedOnDisk(filePath)
-      await writeTextFile(filePath, markdown.value)
+      await tauriWriteTextFile(filePath, markdown.value)
       currentFile.value.content = markdown.value
       // 更新文件路径
       currentFile.value.path = filePath
@@ -1064,6 +1085,29 @@ const handleKeyDown = (event: KeyboardEvent) => {
   }
 }
 
+const hideBootLayer = async () => {
+  if (!currentFile.value) {
+    window.__markflyHideBoot?.()
+    return
+  }
+  await nextTick()
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  })
+  window.__markflyHideBoot?.()
+}
+
+const mountDeferredChrome = () => {
+  const show = () => {
+    showDeferredChrome.value = true
+  }
+  if (typeof requestIdleCallback === 'function') {
+    requestIdleCallback(show, { timeout: 800 })
+  } else {
+    setTimeout(show, 200)
+  }
+}
+
 // 初始化主题
 onMounted(async () => {
   themeStore.initTheme()
@@ -1074,21 +1118,20 @@ onMounted(async () => {
     if (pendingFiles.length > 0) {
       await openFilePaths(pendingFiles)
     } else if (files.value.length === 0) {
-      loadWelcomeSample()
+      await loadWelcomeSample()
     }
   } catch (error) {
     console.error('启动时打开文件失败:', error)
     if (files.value.length === 0) {
-      loadWelcomeSample()
+      await loadWelcomeSample()
     }
   } finally {
     isBootstrapping.value = false
-    await nextTick()
-    window.__markflyHideBoot?.()
+    await hideBootLayer()
     if (currentFile.value) {
-      scheduleMediumPluginLoad(markdown.value)
-      scheduleHeavyPluginLoad(markdown.value)
+      await ensurePreviewPipeline()
     }
+    mountDeferredChrome()
     if (typeof requestIdleCallback === 'function') {
       requestIdleCallback(() => void ensureEditorComponent(), { timeout: 5000 })
     }
@@ -1100,12 +1143,12 @@ onMounted(async () => {
 })
 
 const setupDeferredAppServices = async () => {
-  await listen<string[]>('open-file-path', async (event) => {
-    await openFilePaths(event.payload)
+  await tauriListen<string[]>('open-file-path', async (paths) => {
+    await openFilePaths(paths)
   })
 
-  listen('menu', (event) => {
-    switch (event.payload) {
+  tauriListen<string>('menu', (payload) => {
+    switch (payload) {
       case 'new-file':
         createNewFile()
         break
@@ -1132,8 +1175,8 @@ const setupDeferredAppServices = async () => {
     console.error('注册菜单事件监听器失败:', error)
   })
 
-  unlistenFileChanged = await listen<string>('file-changed', async (event) => {
-    await handleExternalFileChange(event.payload)
+  unlistenFileChanged = await tauriListen<string>('file-changed', async (filePath) => {
+    await handleExternalFileChange(filePath)
   })
 
   await syncDiskFileWatches()
@@ -1160,9 +1203,12 @@ watch(showUnifiedHeader, (visible) => {
   }
 })
 
-watch(editorLayout, (layout) => {
+watch(editorLayout, async (layout) => {
   if (layout !== 'preview-only') {
-    void ensureEditorComponent()
+    await loadMediumPlugins()
+    await ensureEditorComponent()
+  } else {
+    void ensurePreviewPipeline()
   }
   if (layout === 'preview-only') {
     clearByteMdToolbarFromHost()
@@ -1197,7 +1243,7 @@ onUnmounted(() => {
   unlistenFileChanged?.()
   toolbarObserver?.disconnect()
   previewViewerEffectCleanups.forEach((cleanup) => cleanup())
-  void invoke('sync_file_watches', { paths: [] })
+  void tauriInvoke('sync_file_watches', { paths: [] })
 })
 </script>
 
