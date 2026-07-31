@@ -53,6 +53,7 @@
               class="file-tab"
               :class="{ active: file.path === currentFilePath }"
               @click="selectFile(file)"
+              @contextmenu.prevent="openTabContextMenu($event, file)"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" class="tab-file-icon">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" fill="none"/>
@@ -72,6 +73,7 @@
               </button>
             </div>
           </div>
+
           <div
             v-if="showUnifiedHeader"
             ref="toolbarHostRef"
@@ -229,6 +231,53 @@
 
     <!-- 设置面板 -->
     <SettingsPanel :visible="showSettings" @close="showSettings = false" />
+
+    <!-- 标签右键菜单（挂到 body，避免被顶栏裁剪） -->
+    <Teleport to="body">
+      <div
+        v-if="tabContextMenu"
+        class="tab-context-menu"
+        :style="{ left: `${tabContextMenu.x}px`, top: `${tabContextMenu.y}px` }"
+        @click.stop
+        @contextmenu.prevent
+      >
+        <button
+          type="button"
+          class="tab-context-item"
+          title="复制文件名"
+          @click="copyTabFileName"
+        >
+          复制文件名
+        </button>
+        <button
+          type="button"
+          class="tab-context-item"
+          :disabled="!tabContextMenu.isDiskFile"
+          :title="tabContextMenu.isDiskFile ? '复制完整文件路径' : '内置示例或未保存文件没有磁盘路径'"
+          @click="copyTabFilePath"
+        >
+          复制文件路径
+        </button>
+        <button
+          type="button"
+          class="tab-context-item"
+          :disabled="!tabContextMenu.isDiskFile"
+          :title="tabContextMenu.isDiskFile ? '在资源管理器中显示并选中该文件' : '内置示例或未保存文件没有磁盘路径'"
+          @click="revealTabFileInExplorer"
+        >
+          打开文件目录
+        </button>
+        <button
+          type="button"
+          class="tab-context-item"
+          :disabled="!tabContextMenu.isDiskFile"
+          :title="tabContextMenu.isDiskFile ? '从磁盘重新读取并刷新显示' : '内置示例或未保存文件无法刷新'"
+          @click="refreshTabFile"
+        >
+          刷新
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -313,8 +362,23 @@ const SIDEBAR_BTN_TOP_KEY = 'markfly-sidebar-btn-top'
 const TOOLBAR_STORAGE_KEY = 'markfly-toolbar-collapsed'
 const PREVIEW_TOC_STORAGE_KEY = 'markfly-preview-toc-visible'
 const EDITOR_MODE_STORAGE_KEY = 'markfly-editor-mode'
+/** WebView 刷新后用于恢复已打开的磁盘文件列表 */
+const OPEN_SESSION_KEY = 'markfly-open-session'
 const SIDEBAR_WIDTH = 280
 const SIDEBAR_BTN_HEIGHT = 48
+
+type OpenSession = {
+  paths: string[]
+  currentPath: string
+}
+
+type TabContextMenuState = {
+  x: number
+  y: number
+  file: FileItem
+  /** 是否为真实磁盘文件（内置示例 / 未另存新建文件为 false） */
+  isDiskFile: boolean
+}
 
 type EditorLayoutMode = 'preview-only' | 'split' | 'tab'
 
@@ -371,6 +435,9 @@ const externalChangePaths = ref<string[]>([])
 const watchSuppressUntil = new Map<string, number>()
 let unlistenFileChanged: (() => void) | null = null
 let reloadPromptOpen = false
+const tabContextMenu = ref<TabContextMenuState | null>(null)
+/** 防止右键抬起触发的 click 立刻关掉刚打开的菜单 */
+let tabContextMenuOpenedAt = 0
 
 const markExternalChange = (filePath: string) => {
   if (!externalChangePaths.value.includes(filePath)) {
@@ -894,6 +961,99 @@ const isWatchSuppressed = (filePath: string) => {
   return until !== undefined && Date.now() < until
 }
 
+const persistOpenSession = () => {
+  const paths = files.value.map((file) => file.path).filter(isDiskFilePath)
+  const currentPath =
+    currentFile.value && isDiskFilePath(currentFile.value.path)
+      ? currentFile.value.path
+      : ''
+  try {
+    const session: OpenSession = { paths, currentPath }
+    sessionStorage.setItem(OPEN_SESSION_KEY, JSON.stringify(session))
+  } catch {
+    // 忽略私密模式 / 配额错误
+  }
+}
+
+const readOpenSession = (): OpenSession | null => {
+  try {
+    const raw = sessionStorage.getItem(OPEN_SESSION_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as OpenSession
+    if (!Array.isArray(parsed.paths)) return null
+    return {
+      paths: parsed.paths.filter((path) => typeof path === 'string' && isDiskFilePath(path)),
+      currentPath: typeof parsed.currentPath === 'string' ? parsed.currentPath : ''
+    }
+  } catch {
+    return null
+  }
+}
+
+const closeTabContextMenu = (force = false) => {
+  // 注意：不要把 DOM Event 当成 force；只有显式 true 才强制关闭
+  if (force !== true && Date.now() - tabContextMenuOpenedAt < 120) return
+  tabContextMenu.value = null
+}
+
+const onWindowClickCloseTabMenu = () => {
+  closeTabContextMenu(false)
+}
+
+const openTabContextMenu = (event: MouseEvent, file: FileItem) => {
+  tabContextMenuOpenedAt = Date.now()
+  tabContextMenu.value = {
+    x: event.clientX,
+    y: event.clientY,
+    file,
+    isDiskFile: isDiskFilePath(file.path)
+  }
+}
+
+const copyTabFilePath = async () => {
+  const menu = tabContextMenu.value
+  if (!menu?.isDiskFile) return
+  try {
+    await navigator.clipboard.writeText(menu.file.path)
+  } catch (error) {
+    console.error('复制文件路径失败:', error)
+  } finally {
+    closeTabContextMenu(true)
+  }
+}
+
+const copyTabFileName = async () => {
+  const menu = tabContextMenu.value
+  if (!menu) return
+  try {
+    await navigator.clipboard.writeText(menu.file.name)
+  } catch (error) {
+    console.error('复制文件名失败:', error)
+  } finally {
+    closeTabContextMenu(true)
+  }
+}
+
+const revealTabFileInExplorer = async () => {
+  const menu = tabContextMenu.value
+  if (!menu?.isDiskFile) return
+  const filePath = menu.file.path
+  closeTabContextMenu(true)
+  try {
+    await tauriInvoke('reveal_in_file_manager', { path: filePath })
+  } catch (error) {
+    console.error('打开所在目录失败:', error)
+  }
+}
+
+const refreshTabFile = async () => {
+  const menu = tabContextMenu.value
+  if (!menu?.isDiskFile) return
+  const file = menu.file
+  closeTabContextMenu(true)
+  await refreshFileFromDisk(file)
+}
+
 const syncDiskFileWatches = async () => {
   const paths = files.value.map((file) => file.path).filter(isDiskFilePath)
   try {
@@ -911,7 +1071,74 @@ const reloadFileFromDisk = async (file: FileItem, newContent?: string) => {
   if (currentFile.value?.path === file.path) {
     markdown.value = content
     isModified.value = false
+    await ensurePreviewPipeline()
+    void syncPreviewAssets()
   }
+}
+
+/** 手动刷新：从磁盘重读最新内容并更新显示 */
+const refreshFileFromDisk = async (file: FileItem) => {
+  if (!isDiskFilePath(file.path)) return
+
+  if (isModified.value && currentFile.value?.path === file.path) {
+    const ok = await tauriAsk(
+      `「${file.name}」有未保存更改，重新加载将丢失修改。\n\n是否继续？`,
+      { title: 'MarkFly', kind: 'warning', okLabel: '重新加载', cancelLabel: '取消' }
+    )
+    if (!ok) return
+  }
+
+  try {
+    await reloadFileFromDisk(file)
+  } catch (error) {
+    console.error('从磁盘重新加载失败:', error)
+  }
+}
+
+/**
+ * 按路径从磁盘重新打开文件（忽略缓存内容，始终读最新）。
+ * 用于启动恢复与 WebView Refresh。
+ */
+const openDiskPathsFresh = async (paths: string[], preferredCurrent = '') => {
+  const uniquePaths = [...new Set(paths.filter(isDiskFilePath))]
+  if (uniquePaths.length === 0) return false
+
+  for (const path of uniquePaths) {
+    const existing = files.value.find((file) => file.path === path)
+    if (existing) {
+      try {
+        await reloadFileFromDisk(existing)
+      } catch (error) {
+        console.error('重新读取文件失败:', path, error)
+      }
+      continue
+    }
+
+    try {
+      const content = await tauriReadTextFile(path)
+      files.value.push({
+        name: getFileNameFromPath(path),
+        path,
+        content
+      })
+    } catch (error) {
+      console.error('重新读取文件失败:', path, error)
+    }
+  }
+
+  const targetPath =
+    (preferredCurrent && files.value.some((file) => file.path === preferredCurrent)
+      ? preferredCurrent
+      : '') ||
+    uniquePaths.find((path) => files.value.some((file) => file.path === path)) ||
+    ''
+
+  if (targetPath) {
+    const file = files.value.find((item) => item.path === targetPath)
+    if (file) await selectFile(file)
+  }
+
+  return files.value.some((file) => isDiskFilePath(file.path))
 }
 
 const promptReloadFile = async (file: FileItem, newContent: string) => {
@@ -1145,11 +1372,25 @@ const saveFileAs = async () => {
 
 // 新增：处理键盘快捷键
 const handleKeyDown = (event: KeyboardEvent) => {
+  if (event.key === 'Escape' && tabContextMenu.value) {
+    closeTabContextMenu()
+    return
+  }
+
   // Ctrl/Cmd + B 显示/隐藏侧边栏（捕获阶段优先于编辑器粗体）
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'b' && !event.shiftKey && !event.altKey) {
     event.preventDefault()
     event.stopPropagation()
     toggleSidebar()
+    return
+  }
+  // Ctrl/Cmd + R：从磁盘重新加载当前文件（避免 WebView 整页刷新用到旧缓存）
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'r' && !event.shiftKey && !event.altKey) {
+    event.preventDefault()
+    event.stopPropagation()
+    if (currentFile.value) {
+      void refreshFileFromDisk(currentFile.value)
+    }
     return
   }
   // Ctrl/Cmd + O 打开文件
@@ -1189,14 +1430,33 @@ const mountDeferredChrome = () => {
 onMounted(async () => {
   themeStore.initTheme()
   window.addEventListener('keydown', handleKeyDown, true)
+  window.addEventListener('click', onWindowClickCloseTabMenu)
+  window.addEventListener('blur', onWindowClickCloseTabMenu)
+  window.addEventListener('beforeunload', persistOpenSession)
 
   // 尽早关闭 boot 层，避免 PageLoad Finished 再次注入 boot 盖住 Vue UI
   await hideBootLayer()
 
   try {
     const pendingFiles = await pendingBootstrapPromise
-    if (pendingFiles.length > 0) {
-      await openFilePaths(pendingFiles)
+    const session = readOpenSession()
+    // boot / pending 里的 content 可能是启动时的旧缓存；刷新后一律按路径重读磁盘
+    const pendingPaths = pendingFiles.map((file) => file.path).filter(isDiskFilePath)
+    const sessionPaths = session?.paths ?? []
+    const pathsToRestore = [...new Set([...pendingPaths, ...sessionPaths])]
+    const preferredCurrent =
+      (session?.currentPath && pathsToRestore.includes(session.currentPath)
+        ? session.currentPath
+        : '') ||
+      pendingPaths[0] ||
+      sessionPaths[0] ||
+      ''
+
+    if (pathsToRestore.length > 0) {
+      const restored = await openDiskPathsFresh(pathsToRestore, preferredCurrent)
+      if (!restored && files.value.length === 0) {
+        await loadWelcomeSample()
+      }
     } else if (files.value.length === 0) {
       await loadWelcomeSample()
     }
@@ -1207,6 +1467,7 @@ onMounted(async () => {
     }
   } finally {
     isBootstrapping.value = false
+    persistOpenSession()
     try {
       if (currentFile.value) {
         await ensurePreviewPipeline()
@@ -1274,6 +1535,7 @@ watch(
   () => files.value.map((file) => file.path).join('\0'),
   () => {
     void syncDiskFileWatches()
+    persistOpenSession()
   }
 )
 
@@ -1302,6 +1564,8 @@ watch(editorLayout, async (layout) => {
 })
 
 watch(currentFilePath, () => {
+  persistOpenSession()
+  closeTabContextMenu()
   scheduleToolbarMount()
   nextTick(setupToolbarObserver)
 })
@@ -1329,6 +1593,9 @@ watch([markdown, editorLayout, currentFilePath], () => {
 // 清理事件监听器
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown, true)
+  window.removeEventListener('click', onWindowClickCloseTabMenu)
+  window.removeEventListener('blur', onWindowClickCloseTabMenu)
+  window.removeEventListener('beforeunload', persistOpenSession)
   window.removeEventListener('resize', clampSidebarBtnPosition)
   unlistenFileChanged?.()
   toolbarObserver?.disconnect()
@@ -1411,6 +1678,38 @@ onUnmounted(() => {
 
 .file-tab.active .tab-file-icon {
   color: var(--tab-active-fg);
+}
+
+.tab-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 160px;
+  padding: 4px 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+
+.tab-context-item {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tab-context-item:hover:not(:disabled) {
+  background: var(--hover-bg);
+}
+
+.tab-context-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .tab-name {

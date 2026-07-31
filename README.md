@@ -8,25 +8,32 @@
 
 ## 📦 最新版本发布
 
-### MarkFly v0.1.2 (2026-07-17)
+### MarkFly v0.1.3 (2026-07-31)
 
-[v0.1.2 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.2) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
+[v0.1.3 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.3) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
 
 #### 下载安装包
 
 - **Windows**
-  - [MarkFly_0.1.2_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.2/MarkFly_0.1.2_x64-setup.exe) (4.34 MB)
+  - [MarkFly_0.1.3_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.3/MarkFly_0.1.3_x64-setup.exe)
 
 > macOS / Linux 安装包可通过 [GitHub Actions 手动发版](https://github.com/TimzChen/MarkFly/actions/workflows/manual-release.yml) 构建，或参考下方「构建应用」在本地打包。
 
-#### v0.1.2 更新内容
+#### v0.1.3 更新内容
 
-- **预览目录**：预览模式支持目录侧栏，快速跳转标题
-- **工具栏图标**：分屏 / 编辑 / 预览按钮与 ByteMD 图标统一
-- **本地图片**：相对路径图片通过 asset 协议正确加载
-- **大图查看**：点击图片可滚轮缩放、拖动平移查看
+- **标签右键菜单**：复制文件名、复制文件路径、打开文件目录、刷新
+- **从磁盘刷新**：刷新时重新读取最新文件内容并更新显示
+- **打开文件目录**：在资源管理器中定位并选中当前文件
 
 #### 历史版本
+
+<details>
+<summary>MarkFly v0.1.2 (2026-07-17)</summary>
+
+- **Windows**: [MarkFly_0.1.2_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.2/MarkFly_0.1.2_x64-setup.exe) (4.34 MB)
+- 预览目录、本地图片加载、大图缩放查看等
+
+</details>
 
 <details>
 <summary>MarkFly v0.1.1 (2026-07-17)</summary>
@@ -187,7 +194,7 @@ Windows 本地发版（NSIS 安装包）：
 
 ```powershell
 .\scripts\build-release.ps1
-# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.2_x64-setup.exe
+# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.3_x64-setup.exe
 ```
 
 ## 📖 使用指南

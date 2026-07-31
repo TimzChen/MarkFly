@@ -157,9 +157,19 @@ fn boot_preview_files(boot: &[PendingOpenFile]) -> Vec<BootPreviewFile> {
         .collect()
 }
 
+/// 刷新前重新从磁盘读取，避免 WebView Refresh 仍使用启动时的旧内容
+fn refresh_pending_contents(pending: &mut Vec<PendingOpenFile>) {
+    for item in pending.iter_mut() {
+        if let Ok(content) = fs::read_to_string(&item.path) {
+            item.content = content;
+        }
+    }
+}
+
 fn pending_boot_snapshot(webview: &Webview) -> Vec<PendingOpenFile> {
     let state = webview.app_handle().state::<PendingOpenFiles>();
-    let pending = state.0.lock().unwrap();
+    let mut pending = state.0.lock().unwrap();
+    refresh_pending_contents(&mut pending);
     pending.clone()
 }
 
@@ -288,14 +298,16 @@ fn focus_main_window(app: &tauri::AppHandle) {
 fn get_app_info() -> serde_json::Value {
     serde_json::json!({
         "name": "MarkFly",
-        "version": "0.1.2",
+        "version": "0.1.3",
         "description": "跨平台 Markdown 编辑器"
     })
 }
 
 #[tauri::command]
 fn get_pending_open_files(state: State<PendingOpenFiles>) -> Vec<PendingOpenFile> {
-    state.0.lock().unwrap().drain(..).collect()
+    let mut pending = state.0.lock().unwrap();
+    refresh_pending_contents(&mut pending);
+    pending.drain(..).collect()
 }
 
 #[tauri::command]
@@ -307,6 +319,56 @@ fn allow_preview_asset(app: tauri::AppHandle, path: String) -> Result<(), String
     app.fs_scope()
         .allow_file(&path)
         .map_err(|error| error.to_string())
+}
+
+/// 在系统文件管理器中定位并选中该文件（类似 Reveal in File Explorer）
+#[tauri::command]
+fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    let path = PathBuf::from(&path);
+    if !path.exists() {
+        return Err(format!("路径不存在: {}", path.display()));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // 去掉 Windows canonicalize 产生的 \\?\ 前缀，避免 explorer 无法识别
+        let absolute = fs::canonicalize(&path).unwrap_or(path);
+        let display = absolute
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_string();
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{display}"))
+            .spawn()
+            .map_err(|error| format!("打开资源管理器失败: {error}"))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-R", &path.to_string_lossy()])
+            .spawn()
+            .map_err(|error| format!("打开 Finder 失败: {error}"))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let parent = path
+            .parent()
+            .ok_or_else(|| "无法获取所在目录".to_string())?;
+        std::process::Command::new("xdg-open")
+            .arg(parent)
+            .spawn()
+            .map_err(|error| format!("打开文件管理器失败: {error}"))?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        Err("当前平台不支持打开所在目录".to_string())
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -322,6 +384,7 @@ pub fn run() {
             get_app_info,
             get_pending_open_files,
             allow_preview_asset,
+            reveal_in_file_manager,
             file_watcher::sync_file_watches
         ]);
 

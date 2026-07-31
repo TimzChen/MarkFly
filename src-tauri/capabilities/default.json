@@ -16,6 +16,7 @@
     "fs:allow-exists",
     "allow-get-pending-open-files",
     "allow-sync-file-watches",
-    "allow-preview-asset"
+    "allow-preview-asset",
+    "allow-reveal-in-file-manager"
   ]
 }
