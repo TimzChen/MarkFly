@@ -12,6 +12,9 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuild
 use tauri::webview::PageLoadEvent;
 use tauri::{Emitter, Manager, State, Webview};
 use tauri_plugin_fs::FsExt;
+use tauri_plugin_opener::OpenerExt;
+
+const PROJECT_HOME_URL: &str = "https://github.com/TimzChen/MarkFly";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct PendingOpenFile {
@@ -199,7 +202,7 @@ fn show_main_window(app: &tauri::AppHandle) {
 fn setup_app_menus(app: &tauri::AppHandle) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
     let app_menu = SubmenuBuilder::new(app, "MarkFly")
-        .item(&PredefinedMenuItem::about(app, Some("关于 MarkFly"), None)?)
+        .text("about", "关于 MarkFly")
         .separator()
         .item(&PredefinedMenuItem::services(app, Some("服务"))?)
         .separator()
@@ -278,6 +281,11 @@ fn setup_app_menus(app: &tauri::AppHandle) -> tauri::Result<()> {
             "exit" | "quit" => {
                 app_handle.exit(0);
             }
+            "about" => {
+                let _ = app_handle
+                    .opener()
+                    .open_url(PROJECT_HOME_URL, None::<&str>);
+            }
             _ => {}
         }
     });
@@ -298,7 +306,7 @@ fn focus_main_window(app: &tauri::AppHandle) {
 fn get_app_info() -> serde_json::Value {
     serde_json::json!({
         "name": "MarkFly",
-        "version": "0.1.3",
+        "version": "0.1.4",
         "description": "跨平台 Markdown 编辑器"
     })
 }
@@ -378,6 +386,7 @@ pub fn run() {
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(PendingOpenFiles(Mutex::new(initial_boot)))
         .manage(file_watcher::FileWatcherState::new())
         .invoke_handler(tauri::generate_handler![

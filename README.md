@@ -8,24 +8,32 @@
 
 ## 📦 最新版本发布
 
-### MarkFly v0.1.3 (2026-07-31)
+### MarkFly v0.1.4 (2026-08-04)
 
-[v0.1.3 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.3) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
+[v0.1.4 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.4) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
 
 #### 下载安装包
 
 - **Windows**
-  - [MarkFly_0.1.3_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.3/MarkFly_0.1.3_x64-setup.exe)
+  - [MarkFly_0.1.4_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.4/MarkFly_0.1.4_x64-setup.exe)
 
 > macOS / Linux 安装包可通过 [GitHub Actions 手动发版](https://github.com/TimzChen/MarkFly/actions/workflows/manual-release.yml) 构建，或参考下方「构建应用」在本地打包。
 
-#### v0.1.3 更新内容
+#### v0.1.4 更新内容
 
-- **标签右键菜单**：复制文件名、复制文件路径、打开文件目录、刷新
-- **从磁盘刷新**：刷新时重新读取最新文件内容并更新显示
-- **打开文件目录**：在资源管理器中定位并选中当前文件
+- **外部变更提示优化**：文件被其他程序修改时，改为顶部非阻断提示条，不再弹出系统对话框抢焦点
+- **一键重新加载**：点击提示条即可从磁盘读取最新内容；右侧可关闭提示
+- **关于页跳转**：帮助 → 关于 MarkFly，在浏览器打开 GitHub 项目主页
 
 #### 历史版本
+
+<details>
+<summary>MarkFly v0.1.3 (2026-07-31)</summary>
+
+- **Windows**: [MarkFly_0.1.3_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.3/MarkFly_0.1.3_x64-setup.exe)
+- 标签右键菜单、从磁盘刷新、打开文件目录
+
+</details>
 
 <details>
 <summary>MarkFly v0.1.2 (2026-07-17)</summary>
@@ -124,7 +132,7 @@ MarkFly 的目标是成为一款轻量级、高性能且功能丰富的 Markdown
 - 🖥️ **跨平台支持**: 完美支持 Windows、macOS、Linux 三大操作系统
 - 📝 **实时预览**: 分屏 / 仅预览 / 标签切换，多种布局随心选
 - 🗂️ **文件管理**: 侧边栏文件树、多标签页、打开文件夹、Shell 关联打开
-- 🔔 **外部变更检测**: 文件被其他程序修改时提示重新加载
+- 🔔 **外部变更检测**: 文件被其他程序修改时顶部轻提示，点击即可重新加载
 - 🎨 **VS Code 风格界面**: 标签栏、状态栏、列表选中态主题统一
 - 🎨 **语法高亮**: 支持 180+ 编程语言的代码高亮显示
 - 📊 **图表支持**: 内置 Mermaid 流程图、时序图等图表渲染
@@ -194,7 +202,7 @@ Windows 本地发版（NSIS 安装包）：
 
 ```powershell
 .\scripts\build-release.ps1
-# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.3_x64-setup.exe
+# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.4_x64-setup.exe
 ```
 
 ## 📖 使用指南

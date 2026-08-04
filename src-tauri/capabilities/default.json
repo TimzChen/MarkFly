@@ -17,6 +17,7 @@
     "allow-get-pending-open-files",
     "allow-sync-file-watches",
     "allow-preview-asset",
-    "allow-reveal-in-file-manager"
+    "allow-reveal-in-file-manager",
+    "opener:default"
   ]
 }

@@ -130,6 +130,53 @@
             </button>
           </div>
         </div>
+
+        <!-- 外部变更：整条可点刷新，不抢焦点 -->
+        <div
+          v-if="showExternalChangeBanner"
+          class="external-change-banner"
+          role="button"
+          tabindex="0"
+          title="点击重新加载"
+          @click="reloadCurrentFileFromDisk"
+          @keydown.enter.prevent="reloadCurrentFileFromDisk"
+        >
+          <svg class="external-change-banner-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              d="M21 12a9 9 0 1 1-2.64-6.36"
+              stroke="currentColor"
+              stroke-width="1.75"
+              stroke-linecap="round"
+            />
+            <polyline
+              points="21,3 21,9 15,9"
+              stroke="currentColor"
+              stroke-width="1.75"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+          <span class="external-change-banner-text">
+            <span class="external-change-banner-label">磁盘文件已更新</span>
+            <span class="external-change-banner-sep">·</span>
+            <span class="external-change-banner-hint">
+              {{ isModified ? '重新加载将丢弃未保存更改' : '点击重新加载' }}
+            </span>
+          </span>
+          <span class="external-change-banner-arrow" aria-hidden="true">→</span>
+          <button
+            type="button"
+            class="external-change-banner-close"
+            title="关闭提示"
+            aria-label="关闭提示"
+            @click.stop="dismissExternalChangeBanner"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2"/>
+              <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2"/>
+            </svg>
+          </button>
+        </div>
         
         <div class="editor-main">
           <div
@@ -432,9 +479,12 @@ let toolbarObserver: MutationObserver | null = null
 let previewViewerEffectCleanups: Array<() => void> = []
 let bytemdGetProcessor: ((options: { plugins: BytemdPlugin[] }) => { processSync: (value: string) => { toString: () => string } }) | null = null
 const externalChangePaths = ref<string[]>([])
+/** 用户关掉顶部横幅的路径；磁盘内容再次变更时会重新显示 */
+const dismissedExternalBannerPaths = ref<string[]>([])
+/** 最近一次检测到的磁盘内容，用于区分「重复监听」与「又改了一版」 */
+const lastExternalContents = new Map<string, string>()
 const watchSuppressUntil = new Map<string, number>()
 let unlistenFileChanged: (() => void) | null = null
-let reloadPromptOpen = false
 const tabContextMenu = ref<TabContextMenuState | null>(null)
 /** 防止右键抬起触发的 click 立刻关掉刚打开的菜单 */
 let tabContextMenuOpenedAt = 0
@@ -446,15 +496,38 @@ const markExternalChange = (filePath: string) => {
 }
 
 const clearExternalChange = (filePath: string) => {
+  lastExternalContents.delete(filePath)
+  if (dismissedExternalBannerPaths.value.includes(filePath)) {
+    dismissedExternalBannerPaths.value = dismissedExternalBannerPaths.value.filter(
+      (path) => path !== filePath
+    )
+  }
   if (externalChangePaths.value.includes(filePath)) {
     externalChangePaths.value = externalChangePaths.value.filter((path) => path !== filePath)
   }
+}
+
+/** 磁盘出现新一版内容时，重新打开已被关掉的横幅 */
+const revealExternalChangeBanner = (filePath: string) => {
+  if (!dismissedExternalBannerPaths.value.includes(filePath)) return
+  dismissedExternalBannerPaths.value = dismissedExternalBannerPaths.value.filter(
+    (path) => path !== filePath
+  )
 }
 
 // 计算属性
 const currentFilePath = computed(() => currentFile.value?.path ?? '')
 const showUnifiedHeader = computed(() => files.value.length > 0 && !!currentFile.value)
 const usePreviewViewer = computed(() => editorLayout.value === 'preview-only')
+/** 当前文件有外部变更且未主动关闭横幅时显示 */
+const showExternalChangeBanner = computed(() => {
+  const path = currentFile.value?.path
+  return (
+    !!path &&
+    externalChangePaths.value.includes(path) &&
+    !dismissedExternalBannerPaths.value.includes(path)
+  )
+})
 
 const clearByteMdToolbarFromHost = () => {
   toolbarActionsRef.value?.querySelectorAll('.bytemd-toolbar').forEach((node) => node.remove())
@@ -1141,33 +1214,17 @@ const openDiskPathsFresh = async (paths: string[], preferredCurrent = '') => {
   return files.value.some((file) => isDiskFilePath(file.path))
 }
 
-const promptReloadFile = async (file: FileItem, newContent: string) => {
-  if (reloadPromptOpen) {
-    markExternalChange(file.path)
-    return
-  }
+/** 顶部横幅：从磁盘重新加载当前文件 */
+const reloadCurrentFileFromDisk = async () => {
+  if (!currentFile.value) return
+  await refreshFileFromDisk(currentFile.value)
+}
 
-  reloadPromptOpen = true
-  try {
-    const message = isModified.value && currentFile.value?.path === file.path
-      ? `「${file.name}」已在磁盘上被其他程序修改。\n\n是否重新加载？未保存的更改将会丢失。`
-      : `「${file.name}」已在磁盘上被其他程序修改。\n\n是否重新加载？`
-
-    const reload = await tauriAsk(message, {
-      title: 'MarkFly',
-      kind: 'warning',
-      okLabel: '重新加载',
-      cancelLabel: '取消'
-    })
-
-    if (reload) {
-      await reloadFileFromDisk(file, newContent)
-    } else {
-      markExternalChange(file.path)
-    }
-  } finally {
-    reloadPromptOpen = false
-  }
+/** 关闭顶部提示（保留标签黄点，仍可通过右键 / Ctrl+R 刷新） */
+const dismissExternalChangeBanner = () => {
+  const path = currentFile.value?.path
+  if (!path || dismissedExternalBannerPaths.value.includes(path)) return
+  dismissedExternalBannerPaths.value = [...dismissedExternalBannerPaths.value, path]
 }
 
 const handleExternalFileChange = async (filePath: string) => {
@@ -1189,14 +1246,17 @@ const handleExternalFileChange = async (filePath: string) => {
   }
 
   if (newContent === file.content) {
+    clearExternalChange(filePath)
     return
   }
 
-  if (currentFile.value?.path === filePath) {
-    await promptReloadFile(file, newContent)
-  } else {
-    markExternalChange(filePath)
+  const prevNotified = lastExternalContents.get(filePath)
+  lastExternalContents.set(filePath, newContent)
+  // 仅在内容相对上次通知发生变化时重新弹出横幅，避免保存时重复事件刷屏
+  if (prevNotified !== newContent) {
+    revealExternalChangeBanner(filePath)
   }
+  markExternalChange(filePath)
 }
 
 const checkPendingExternalChange = async (file: FileItem) => {
@@ -1218,7 +1278,8 @@ const checkPendingExternalChange = async (file: FileItem) => {
     return
   }
 
-  await promptReloadFile(file, newContent)
+  // 切回该标签时重新展示横幅（关闭只影响当前停留期间）
+  revealExternalChangeBanner(file.path)
 }
 
 const loadWelcomeSample = async () => {
@@ -1726,6 +1787,109 @@ onUnmounted(() => {
   border-radius: 50%;
   background: #f59e0b;
   flex-shrink: 0;
+}
+
+/* 外部文件变更：单行轻提示（整条可点，右侧关闭） */
+.external-change-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 10px 6px 14px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--accent-color) 5%, var(--bg-primary));
+  border-bottom: 1px solid var(--border-color);
+  border-left: 2px solid var(--accent-color);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.15s ease;
+}
+
+.external-change-banner:hover {
+  background: color-mix(in srgb, var(--accent-color) 8%, var(--bg-primary));
+}
+
+.external-change-banner:focus-visible {
+  outline: 1px solid var(--accent-color);
+  outline-offset: -1px;
+}
+
+.external-change-banner-icon {
+  flex-shrink: 0;
+  color: var(--accent-color);
+  opacity: 0.75;
+}
+
+.external-change-banner-text {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.external-change-banner-label {
+  flex-shrink: 0;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.external-change-banner-sep {
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+}
+
+.external-change-banner-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+}
+
+.external-change-banner:hover .external-change-banner-hint {
+  color: var(--accent-color);
+}
+
+.external-change-banner-arrow {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-right: 2px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-tertiary);
+  transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.external-change-banner:hover .external-change-banner-arrow {
+  color: var(--accent-color);
+  transform: translateX(2px);
+}
+
+.external-change-banner-close {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.7;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.external-change-banner-close:hover {
+  opacity: 1;
+  background: var(--hover-bg);
+  color: var(--text-secondary);
 }
 
 .tab-close {
