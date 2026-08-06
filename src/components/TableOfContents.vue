@@ -46,12 +46,23 @@ const emit = defineEmits<{
   close: []
 }>()
 
-const headings = computed(() => {
-  const headingRegex = /^(#{1,6})\s+(.+)$/gm
+/** 从 markdown 提取标题；跳过 fenced code，避免把 `# 注释` 当成标题导致目录索引错位 */
+const extractHeadings = (markdown: string): Heading[] => {
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n')
   const matches: Heading[] = []
-  let match
+  let inCodeFence = false
 
-  while ((match = headingRegex.exec(props.content)) !== null) {
+  for (const line of lines) {
+    // 围栏代码块（``` / ~~~），与缩进无关
+    if (/^\s*(```|~~~)/.test(line)) {
+      inCodeFence = !inCodeFence
+      continue
+    }
+    if (inCodeFence) continue
+
+    const match = line.match(/^(#{1,6})\s+(.+)$/)
+    if (!match) continue
+
     matches.push({
       level: match[1].length,
       text: match[2].trim(),
@@ -59,13 +70,23 @@ const headings = computed(() => {
   }
 
   return matches
-})
+}
+
+const headings = computed(() => extractHeadings(props.content))
 
 const scrollToHeading = (index: number) => {
   const root = props.scrollRoot
   if (!root) return
-  const nodes = root.querySelectorAll('h1,h2,h3,h4,h5,h6')
-  nodes[index]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+
+  const target = root.querySelectorAll('h1,h2,h3,h4,h5,h6')[index] as HTMLElement | undefined
+  if (!target) return
+
+  // 只滚动预览容器，避免 scrollIntoView 连带外层滚动；文末标题 clamp 到 maxScroll
+  const rootRect = root.getBoundingClientRect()
+  const targetRect = target.getBoundingClientRect()
+  const nextTop = targetRect.top - rootRect.top + root.scrollTop
+  const maxScroll = Math.max(0, root.scrollHeight - root.clientHeight)
+  root.scrollTo({ top: Math.min(Math.max(0, nextTop), maxScroll), behavior: 'smooth' })
 }
 </script>
 

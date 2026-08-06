@@ -8,24 +8,31 @@
 
 ## 📦 最新版本发布
 
-### MarkFly v0.1.4 (2026-08-04)
+### MarkFly v0.1.5 (2026-08-06)
 
-[v0.1.4 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.4) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
+[v0.1.5 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.5) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
 
 #### 下载安装包
 
 - **Windows**
-  - [MarkFly_0.1.4_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.4/MarkFly_0.1.4_x64-setup.exe)
+  - [MarkFly_0.1.5_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.5/MarkFly_0.1.5_x64-setup.exe)
 
 > macOS / Linux 安装包可通过 [GitHub Actions 手动发版](https://github.com/TimzChen/MarkFly/actions/workflows/manual-release.yml) 构建，或参考下方「构建应用」在本地打包。
 
-#### v0.1.4 更新内容
+#### v0.1.5 更新内容
 
-- **外部变更提示优化**：文件被其他程序修改时，改为顶部非阻断提示条，不再弹出系统对话框抢焦点
-- **一键重新加载**：点击提示条即可从磁盘读取最新内容；右侧可关闭提示
-- **关于页跳转**：帮助 → 关于 MarkFly，在浏览器打开 GitHub 项目主页
+- **修复预览目录错位**：跳过代码块内的 `#` 注释，避免目录项与正文标题索引不一致、点击后跳到错误位置
+- **目录滚动更稳**：仅在预览容器内滚动并限制最大滚动位置，减少文末跳转后的异常空白
 
 #### 历史版本
+
+<details>
+<summary>MarkFly v0.1.4 (2026-08-04)</summary>
+
+- **Windows**: [MarkFly_0.1.4_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.4/MarkFly_0.1.4_x64-setup.exe)
+- 外部变更非阻断提示、一键重新加载、关于页跳转 GitHub
+
+</details>
 
 <details>
 <summary>MarkFly v0.1.3 (2026-07-31)</summary>
@@ -202,7 +209,7 @@ Windows 本地发版（NSIS 安装包）：
 
 ```powershell
 .\scripts\build-release.ps1
-# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.4_x64-setup.exe
+# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.5_x64-setup.exe
 ```
 
 ## 📖 使用指南
