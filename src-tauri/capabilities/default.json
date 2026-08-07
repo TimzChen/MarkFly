@@ -17,6 +17,8 @@
     "allow-get-pending-open-files",
     "allow-sync-file-watches",
     "allow-preview-asset",
+    "allow-read-local-text-file",
+    "allow-open-external-url",
     "allow-reveal-in-file-manager",
     "opener:default"
   ]

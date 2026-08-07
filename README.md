@@ -8,23 +8,33 @@
 
 ## 📦 最新版本发布
 
-### MarkFly v0.1.5 (2026-08-06)
+### MarkFly v0.1.6 (2026-08-07)
 
-[v0.1.5 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.5) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
+[v0.1.6 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.6) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
 
 #### 下载安装包
 
 - **Windows**
-  - [MarkFly_0.1.5_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.5/MarkFly_0.1.5_x64-setup.exe)
+  - [MarkFly_0.1.6_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.6/MarkFly_0.1.6_x64-setup.exe)
 
 > macOS / Linux 安装包可通过 [GitHub Actions 手动发版](https://github.com/TimzChen/MarkFly/actions/workflows/manual-release.yml) 构建，或参考下方「构建应用」在本地打包。
 
-#### v0.1.5 更新内容
+#### v0.1.6 更新内容
 
-- **修复预览目录错位**：跳过代码块内的 `#` 注释，避免目录项与正文标题索引不一致、点击后跳到错误位置
-- **目录滚动更稳**：仅在预览容器内滚动并限制最大滚动位置，减少文末跳转后的异常空白
+- **预览本地文件链接**：点击 `d:\...` / 相对路径的 Markdown 链接，可在应用内打开对应文件
+- **外链用系统浏览器打开**：`http(s)` / `mailto` 不再在 WebView 内跳转
+- **金额美元符不再被吃掉**：关闭单 `$` 行内公式误解析，`$412` 等按普通文本显示
+- **打开失败可见提示**：链接目标不存在或无法读取时，顶部给出短暂提示
 
 #### 历史版本
+
+<details>
+<summary>MarkFly v0.1.5 (2026-08-06)</summary>
+
+- **Windows**: [MarkFly_0.1.5_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.5/MarkFly_0.1.5_x64-setup.exe)
+- 修复预览目录代码块伪标题错位、目录滚动更稳
+
+</details>
 
 <details>
 <summary>MarkFly v0.1.4 (2026-08-04)</summary>
@@ -209,7 +219,7 @@ Windows 本地发版（NSIS 安装包）：
 
 ```powershell
 .\scripts\build-release.ps1
-# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.5_x64-setup.exe
+# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.6_x64-setup.exe
 ```
 
 ## 📖 使用指南

@@ -1,5 +1,6 @@
 import type { BytemdPlugin } from 'bytemd'
 import { needsFullPreview } from './markdownPreview'
+import { createLocalFileLinksPlugin } from './previewLinkConfig'
 
 export type MediumPreviewModules = {
   getProcessor: typeof import('bytemd').getProcessor
@@ -23,7 +24,7 @@ const loadMediumModules = (): Promise<MediumPreviewModules> => {
 
     return {
       getProcessor: bytemd.getProcessor,
-      createPlugins: () => [gfm(), highlight()],
+      createPlugins: () => [gfm(), highlight(), createLocalFileLinksPlugin()],
     }
   })()
 }

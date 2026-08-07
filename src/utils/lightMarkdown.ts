@@ -10,7 +10,15 @@ const renderInline = (text: string): string =>
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, url) => {
+      const href = escapeHtml(url)
+      const isExternal =
+        /^(https?:|mailto:|#)/i.test(url.trim()) || url.trim().startsWith('//')
+      if (isExternal) {
+        return `<a href="${href}" target="_blank" rel="noopener">${label}</a>`
+      }
+      return `<a href="${href}">${label}</a>`
+    })
 
 /** 零依赖轻量 Markdown 渲染，与 boot 预览层逻辑一致 */
 export const lightMarkdownToHtml = (markdown: string): string => {

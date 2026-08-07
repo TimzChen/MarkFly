@@ -177,6 +177,23 @@
             </svg>
           </button>
         </div>
+
+        <!-- 短暂提示：如预览链接打开失败 -->
+        <div v-if="transientNotice" class="transient-notice" role="status">
+          <span class="transient-notice-text">{{ transientNotice }}</span>
+          <button
+            type="button"
+            class="transient-notice-close"
+            title="关闭"
+            aria-label="关闭提示"
+            @click="clearTransientNotice"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2"/>
+              <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2"/>
+            </svg>
+          </button>
+        </div>
         
         <div class="editor-main">
           <div
@@ -202,6 +219,7 @@
               :is="EditorComponent"
               :value="markdown"
               :plugins="plugins"
+              :sanitize="previewSanitize"
               @change="handleChange"
               :locale="locale"
               mode="split"
@@ -344,6 +362,11 @@ import {
   rewritePreviewAssetUrls,
 } from './utils/previewAssets'
 import { bindPreviewImageZoom, unbindPreviewImageZoom } from './utils/previewImageZoom'
+import {
+  bindPreviewLinkNavigation,
+  unbindPreviewLinkNavigation,
+} from './utils/previewLinkNavigation'
+import { createLocalFileLinksPlugin, previewSanitize } from './utils/previewLinkConfig'
 import { toolbarIcons } from './utils/toolbarIcons'
 import {
   tauriInvoke,
@@ -604,8 +627,9 @@ const needsMediumPlugins = (content: string) => needsFullPreview(content)
 const needsHeavyPlugins = (content: string) => {
   if (!content) return false
   if (/```\s*mermaid\b/.test(content)) return true
+  // 仅识别块级 $$ 与标准行内 \\( \\)；单 $ 是普通字符（金额等），不触发数学插件
   if (/\$\$[\s\S]+?\$\$/.test(content)) return true
-  if (/(?:^|[^\\])\$(?!\$)[^\n$]+\$(?!\$)/m.test(content)) return true
+  if (/\\\([\s\S]+?\\\)/.test(content)) return true
   return false
 }
 
@@ -640,7 +664,7 @@ const loadMediumPlugins = async () => {
         import('@bytemd/plugin-highlight'),
         import('highlight.js/styles/vs.css'),
       ])
-      plugins.value = [gfm(), highlight()]
+      plugins.value = [gfm(), highlight(), createLocalFileLinksPlugin()]
     }
 
     mediumPluginsLoaded = true
@@ -660,12 +684,13 @@ const loadHeavyPlugins = async () => {
 
   heavyPluginsLoading = (async () => {
     await loadMediumPlugins()
-    const [{ default: math }, { default: mermaid }] = await Promise.all([
-      import('@bytemd/plugin-math'),
+    const [{ createMathPlugin }, { default: mermaid }] = await Promise.all([
+      import('./utils/mathPlugin'),
       import('@bytemd/plugin-mermaid'),
       import('katex/dist/katex.css'),
     ])
-    plugins.value = [...plugins.value, math(), mermaid()]
+    const mathPlugin = await createMathPlugin()
+    plugins.value = [...plugins.value, mathPlugin, mermaid()]
     heavyPluginsLoaded = true
   })()
 
@@ -718,12 +743,17 @@ const previewWaitingForPipeline = computed(
 const normalizePreviewHtml = (html: string): string =>
   html.replace(/>\s*\n{2,}\s*</g, '><')
 
+const getPreviewProcessorOptions = () => ({
+  plugins: plugins.value,
+  sanitize: previewSanitize,
+})
+
 const previewHtml = computed(() => {
   const source = previewSource.value
   const filePath = currentFilePath.value
   let html = ''
   if (previewEngineReady.value && bytemdGetProcessor && plugins.value.length > 0) {
-    html = bytemdGetProcessor({ plugins: plugins.value }).processSync(source).toString()
+    html = bytemdGetProcessor(getPreviewProcessorOptions()).processSync(source).toString()
     html = normalizePreviewHtml(html)
   } else if (needsFullPreview(markdown.value)) {
     return '<p class="preview-loading-hint">正在加载完整预览…</p>'
@@ -740,12 +770,13 @@ const applyPreviewViewerEffects = () => {
   const body = previewBodyRef.value
   if (!body || !previewEngineReady.value || !bytemdGetProcessor) {
     if (body) bindPreviewImageZoom(body)
+    ensurePreviewLinkBindings()
     return
   }
 
   fixPreviewImages(body, currentFilePath.value)
 
-  const file = bytemdGetProcessor({ plugins: plugins.value }).processSync(previewSource.value)
+  const file = bytemdGetProcessor(getPreviewProcessorOptions()).processSync(previewSource.value)
   for (const plugin of plugins.value) {
     const cleanup = plugin.viewerEffect?.({ markdownBody: body, file } as never)
     if (typeof cleanup === 'function') {
@@ -754,6 +785,7 @@ const applyPreviewViewerEffects = () => {
   }
 
   bindPreviewImageZoom(body)
+  ensurePreviewLinkBindings()
 }
 
 const syncPreviewAssets = async () => {
@@ -768,6 +800,8 @@ const syncPreviewAssets = async () => {
     fixPreviewImages(byteMdPreview, filePath)
     bindPreviewImageZoom(previewBodyRef.value)
     bindPreviewImageZoom(byteMdPreview)
+    // editor-content 上做捕获委托，分屏预览延迟渲染也能点到
+    ensurePreviewLinkBindings()
   })
 }
 
@@ -874,7 +908,7 @@ console.log(greet('World'));
 \`\`\`
 
 ### 数学公式
-行内公式：$E = mc^2$
+行内公式：\\(E = mc^2\\)
 
 块级公式：
 $$
@@ -1294,15 +1328,43 @@ const loadWelcomeSample = async () => {
   }
 }
 
+const transientNotice = ref('')
+let transientNoticeTimer: ReturnType<typeof setTimeout> | null = null
+
+const clearTransientNotice = () => {
+  if (transientNoticeTimer) {
+    clearTimeout(transientNoticeTimer)
+    transientNoticeTimer = null
+  }
+  transientNotice.value = ''
+}
+
+const showTransientNotice = (message: string, durationMs = 4000) => {
+  clearTransientNotice()
+  transientNotice.value = message
+  transientNoticeTimer = setTimeout(() => {
+    transientNotice.value = ''
+    transientNoticeTimer = null
+  }, durationMs)
+}
+
 const openFileFromPath = async (filePath: string, preloadedContent?: string) => {
   try {
-    const existing = files.value.find((file) => file.path === filePath)
+    const existing = files.value.find(
+      (file) => file.path === filePath || file.path.toLowerCase() === filePath.toLowerCase()
+    )
     if (existing) {
       selectFile(existing)
       return
     }
 
-    const content = preloadedContent ?? await tauriReadTextFile(filePath)
+    // 预览链接打开的文件可能不在 dialog 授权范围内；走后端命令先 allow 再读
+    const content =
+      preloadedContent ??
+      (await tauriInvoke<string>('read_local_text_file', { path: filePath }).catch(async () => {
+        await tauriInvoke('allow_preview_asset', { path: filePath })
+        return tauriReadTextFile(filePath)
+      }))
     const newFile: FileItem = {
       name: getFileNameFromPath(filePath),
       path: filePath,
@@ -1312,8 +1374,31 @@ const openFileFromPath = async (filePath: string, preloadedContent?: string) => 
     files.value.push(newFile)
     selectFile(newFile)
   } catch (error) {
-    console.error('打开文件失败:', error)
+    console.error('打开文件失败:', filePath, error)
+    const name = getFileNameFromPath(filePath)
+    const detail = error instanceof Error ? error.message : String(error ?? '')
+    const hint = detail.includes('不存在') ? '文件不存在或路径无效' : '无法打开该文件'
+    showTransientNotice(`${hint}：${name}`)
   }
+}
+
+/** 挂在 editor-content 上做捕获委托（仅预览/分屏共用，避免双绑） */
+const openExternalUrl = async (url: string) => {
+  try {
+    await tauriInvoke('open_external_url', { url })
+  } catch (error) {
+    console.error('打开外链失败:', url, error)
+    showTransientNotice('无法在系统浏览器中打开该链接')
+  }
+}
+
+const ensurePreviewLinkBindings = () => {
+  bindPreviewLinkNavigation(editorContentRef.value, {
+    getCurrentFilePath: () => currentFilePath.value,
+    onOpenFile: openFileFromPath,
+    onOpenExternal: openExternalUrl,
+    onResolveError: () => showTransientNotice('无法解析该本地链接'),
+  })
 }
 
 const openFilePaths = async (items: PendingOpenFile[] | string[]) => {
@@ -1661,6 +1746,8 @@ onUnmounted(() => {
   unlistenFileChanged?.()
   toolbarObserver?.disconnect()
   unbindPreviewImageZoom(previewBodyRef.value)
+  unbindPreviewLinkNavigation(editorContentRef.value)
+  clearTransientNotice()
   previewViewerEffectCleanups.forEach((cleanup) => cleanup())
   void tauriInvoke('sync_file_watches', { paths: [] })
 })
@@ -1787,6 +1874,49 @@ onUnmounted(() => {
   border-radius: 50%;
   background: #f59e0b;
   flex-shrink: 0;
+}
+
+/* 短暂提示条（打开失败等，不可点操作） */
+.transient-notice {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 10px 6px 14px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, #d97706 8%, var(--bg-primary));
+  border-bottom: 1px solid var(--border-color);
+  border-left: 2px solid #d97706;
+}
+
+.transient-notice-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transient-notice-close {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.transient-notice-close:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
 }
 
 /* 外部文件变更：单行轻提示（整条可点，右侧关闭） */

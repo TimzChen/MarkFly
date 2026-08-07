@@ -329,6 +329,35 @@ fn allow_preview_asset(app: tauri::AppHandle, path: String) -> Result<(), String
         .map_err(|error| error.to_string())
 }
 
+/// 打开本地文本文件：先纳入 FS scope，再用标准库读取（供预览链接跳转）
+#[tauri::command]
+fn read_local_text_file(app: tauri::AppHandle, path: String) -> Result<String, String> {
+    let path = PathBuf::from(&path);
+    if !path.is_file() {
+        return Err(format!("文件不存在: {}", path.display()));
+    }
+    app.fs_scope()
+        .allow_file(&path)
+        .map_err(|error| error.to_string())?;
+    fs::read_to_string(&path).map_err(|error| format!("读取失败: {error}"))
+}
+
+/// 预览区外链：用系统默认浏览器 / 邮件客户端打开
+#[tauri::command]
+fn open_external_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    let trimmed = url.trim();
+    let lower = trimmed.to_lowercase();
+    let allowed = lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("mailto:");
+    if !allowed {
+        return Err("仅允许打开 http(s) 或 mailto 链接".to_string());
+    }
+    app.opener()
+        .open_url(trimmed, None::<&str>)
+        .map_err(|error| error.to_string())
+}
+
 /// 在系统文件管理器中定位并选中该文件（类似 Reveal in File Explorer）
 #[tauri::command]
 fn reveal_in_file_manager(path: String) -> Result<(), String> {
@@ -393,6 +422,8 @@ pub fn run() {
             get_app_info,
             get_pending_open_files,
             allow_preview_asset,
+            read_local_text_file,
+            open_external_url,
             reveal_in_file_manager,
             file_watcher::sync_file_watches
         ]);
