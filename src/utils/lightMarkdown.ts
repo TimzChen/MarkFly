@@ -1,3 +1,5 @@
+import { createHeadingSlugger, headingPlainText } from './headingSlug'
+
 const escapeHtml = (text: string): string =>
   text
     .replace(/&/g, '&amp;')
@@ -12,9 +14,9 @@ const renderInline = (text: string): string =>
     .replace(/\*([^*]+)\*/g, '<em>$1</em>')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label, url) => {
       const href = escapeHtml(url)
-      const isExternal =
-        /^(https?:|mailto:|#)/i.test(url.trim()) || url.trim().startsWith('//')
-      if (isExternal) {
+      const openInNewTab =
+        /^(https?:|mailto:)/i.test(url.trim()) || url.trim().startsWith('//')
+      if (openInNewTab) {
         return `<a href="${href}" target="_blank" rel="noopener">${label}</a>`
       }
       return `<a href="${href}">${label}</a>`
@@ -24,6 +26,7 @@ const renderInline = (text: string): string =>
 export const lightMarkdownToHtml = (markdown: string): string => {
   const lines = markdown.replace(/\r\n/g, '\n').split('\n')
   const html: string[] = []
+  const slugger = createHeadingSlugger()
   let inCode = false
   let codeLines: string[] = []
   let listType = ''
@@ -56,9 +59,9 @@ export const lightMarkdownToHtml = (markdown: string): string => {
     if (/^#{1,6}\s/.test(line)) {
       flushList()
       const level = line.match(/^#+/)![0].length
-      html.push(
-        `<h${level}>${renderInline(line.replace(/^#{1,6}\s/, ''))}</h${level}>`
-      )
+      const raw = line.replace(/^#{1,6}\s/, '')
+      const id = escapeHtml(slugger(headingPlainText(raw)))
+      html.push(`<h${level} id="${id}">${renderInline(raw)}</h${level}>`)
       continue
     }
 

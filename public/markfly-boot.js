@@ -12,7 +12,54 @@
       .replace(/`([^`]+)`/g, '<code>$1</code>')
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_match, label, url) {
+        var href = escapeHtml(url)
+        var openInNewTab = /^(https?:|mailto:)/i.test(url.trim()) || url.trim().indexOf('//') === 0
+        if (openInNewTab) {
+          return '<a href="' + href + '" target="_blank" rel="noopener">' + label + '</a>'
+        }
+        return '<a href="' + href + '">' + label + '</a>'
+      })
+  }
+
+  // 与 src/utils/headingSlug.ts 保持同一套规则，启动闪屏目录才能点
+  var HEADING_PUNCT_RE =
+    /[\][!'#$%&()*+,./:;<=>?@\\^_{|}~`。，、；：？！…—·ˉ¨‘’“”々～‖∶＂＇｀｜〃〔〕〈〉《》「」『』．〖〗【】（）［］｛｝]/g
+
+  function slugifyHeading(text) {
+    return text
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(HEADING_PUNCT_RE, '')
+      .replace(/^-+/, '')
+      .replace(/-+$/, '')
+  }
+
+  function headingPlainText(raw) {
+    return raw
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/__([^_]+)__/g, '$1')
+      .replace(/\*([^*]+)\*/g, '$1')
+      .replace(/_([^_]+)_/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .trim()
+  }
+
+  function createHeadingSlugger() {
+    var used = Object.create(null)
+    return function (text) {
+      var base = slugifyHeading(text) || 'section'
+      var slug = base
+      var n = 1
+      while (used[slug]) {
+        slug = base + '-' + n
+        n += 1
+      }
+      used[slug] = true
+      return slug
+    }
   }
 
   function stripFrontmatter(markdown) {
@@ -25,6 +72,7 @@
   function renderMarkdown(markdown) {
     const lines = stripFrontmatter(markdown).replace(/\r\n/g, '\n').split('\n')
     const html = []
+    const slugger = createHeadingSlugger()
     let inCode = false
     let codeLines = []
     let listType = ''
@@ -57,7 +105,9 @@
       if (/^#{1,6}\s/.test(line)) {
         flushList()
         const level = line.match(/^#+/)[0].length
-        html.push('<h' + level + '>' + renderInline(line.replace(/^#{1,6}\s/, '')) + '</h' + level + '>')
+        const raw = line.replace(/^#{1,6}\s/, '')
+        const id = escapeHtml(slugger(headingPlainText(raw)))
+        html.push('<h' + level + ' id="' + id + '">' + renderInline(raw) + '</h' + level + '>')
         continue
       }
 
@@ -123,7 +173,31 @@
       '<div id="markfly-boot-content" class="markfly-boot-content markdown-body"></div>'
     document.body.appendChild(layer)
     applyBootTheme(layer)
+    bindBootHashLinks(layer.querySelector('#markfly-boot-content'))
     return layer
+  }
+
+  function bindBootHashLinks(content) {
+    if (!content || content.dataset.hashBound) return
+    content.dataset.hashBound = '1'
+    content.addEventListener('click', function (event) {
+      var anchor = event.target.closest('a')
+      if (!anchor || !content.contains(anchor)) return
+      var href = (anchor.getAttribute('href') || '').trim()
+      if (href.charAt(0) !== '#') return
+      event.preventDefault()
+      var id
+      try {
+        id = decodeURIComponent(href.slice(1))
+      } catch (_error) {
+        id = href.slice(1)
+      }
+      if (!id) return
+      var target = content.querySelector('#' + CSS.escape(id))
+      if (!target) return
+      var nextTop = target.getBoundingClientRect().top - content.getBoundingClientRect().top + content.scrollTop
+      content.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' })
+    })
   }
 
   function needsFullPreviewLite(content) {

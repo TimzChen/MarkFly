@@ -355,7 +355,7 @@ import type { FileItem } from './data/sampleFiles'
 import { useThemeStore } from './stores/theme'
 import { lightMarkdownToHtml } from './utils/lightMarkdown'
 import { needsFullPreview, stripFrontmatter } from './utils/markdownPreview'
-import { consumeMediumPreviewPreload, startMediumPreviewPreload } from './utils/previewEngine'
+import { consumeMediumPreviewPreload, createCorePreviewPlugins, startMediumPreviewPreload } from './utils/previewEngine'
 import {
   allowMarkdownAssets,
   fixPreviewImages,
@@ -364,9 +364,10 @@ import {
 import { bindPreviewImageZoom, unbindPreviewImageZoom } from './utils/previewImageZoom'
 import {
   bindPreviewLinkNavigation,
+  scrollPreviewToAnchor,
   unbindPreviewLinkNavigation,
 } from './utils/previewLinkNavigation'
-import { createLocalFileLinksPlugin, previewSanitize } from './utils/previewLinkConfig'
+import { previewSanitize } from './utils/previewLinkConfig'
 import { toolbarIcons } from './utils/toolbarIcons'
 import {
   tauriInvoke,
@@ -664,7 +665,7 @@ const loadMediumPlugins = async () => {
         import('@bytemd/plugin-highlight'),
         import('highlight.js/styles/vs.css'),
       ])
-      plugins.value = [gfm(), highlight(), createLocalFileLinksPlugin()]
+      plugins.value = createCorePreviewPlugins(gfm(), highlight())
     }
 
     mediumPluginsLoaded = true
@@ -771,6 +772,7 @@ const applyPreviewViewerEffects = () => {
   if (!body || !previewEngineReady.value || !bytemdGetProcessor) {
     if (body) bindPreviewImageZoom(body)
     ensurePreviewLinkBindings()
+    consumePendingPreviewHash()
     return
   }
 
@@ -786,6 +788,7 @@ const applyPreviewViewerEffects = () => {
 
   bindPreviewImageZoom(body)
   ensurePreviewLinkBindings()
+  consumePendingPreviewHash()
 }
 
 const syncPreviewAssets = async () => {
@@ -802,6 +805,7 @@ const syncPreviewAssets = async () => {
     bindPreviewImageZoom(byteMdPreview)
     // editor-content 上做捕获委托，分屏预览延迟渲染也能点到
     ensurePreviewLinkBindings()
+    consumePendingPreviewHash()
   })
 }
 
@@ -1348,14 +1352,14 @@ const showTransientNotice = (message: string, durationMs = 4000) => {
   }, durationMs)
 }
 
-const openFileFromPath = async (filePath: string, preloadedContent?: string) => {
+const openFileFromPath = async (filePath: string, preloadedContent?: string): Promise<boolean> => {
   try {
     const existing = files.value.find(
       (file) => file.path === filePath || file.path.toLowerCase() === filePath.toLowerCase()
     )
     if (existing) {
-      selectFile(existing)
-      return
+      await selectFile(existing)
+      return true
     }
 
     // 预览链接打开的文件可能不在 dialog 授权范围内；走后端命令先 allow 再读
@@ -1372,13 +1376,42 @@ const openFileFromPath = async (filePath: string, preloadedContent?: string) => 
     }
 
     files.value.push(newFile)
-    selectFile(newFile)
+    await selectFile(newFile)
+    return true
   } catch (error) {
     console.error('打开文件失败:', filePath, error)
     const name = getFileNameFromPath(filePath)
     const detail = error instanceof Error ? error.message : String(error ?? '')
     const hint = detail.includes('不存在') ? '文件不存在或路径无效' : '无法打开该文件'
     showTransientNotice(`${hint}：${name}`)
+    return false
+  }
+}
+
+/** 打开「文件.md#标题」后，等预览画出标题 id 再滚过去 */
+let pendingPreviewHash = ''
+let pendingPreviewHashUntil = 0
+
+const setPendingPreviewHash = (hash: string) => {
+  pendingPreviewHash = hash
+  pendingPreviewHashUntil = hash ? Date.now() + 3000 : 0
+}
+
+const getPreviewScrollRoot = (): HTMLElement | null => {
+  if (usePreviewViewer.value) return previewBodyRef.value
+  return (editorContentRef.value?.querySelector('.bytemd-preview') as HTMLElement | null) ?? null
+}
+
+const consumePendingPreviewHash = () => {
+  if (!pendingPreviewHash) return
+  if (Date.now() > pendingPreviewHashUntil) {
+    pendingPreviewHash = ''
+    return
+  }
+  const root = getPreviewScrollRoot()
+  if (!root) return
+  if (scrollPreviewToAnchor(root, pendingPreviewHash, 'auto')) {
+    pendingPreviewHash = ''
   }
 }
 
@@ -1395,7 +1428,16 @@ const openExternalUrl = async (url: string) => {
 const ensurePreviewLinkBindings = () => {
   bindPreviewLinkNavigation(editorContentRef.value, {
     getCurrentFilePath: () => currentFilePath.value,
-    onOpenFile: openFileFromPath,
+    onOpenFile: async (path, hash) => {
+      setPendingPreviewHash(hash ?? '')
+      const opened = await openFileFromPath(path)
+      if (!opened) {
+        setPendingPreviewHash('')
+        return
+      }
+      await nextTick()
+      consumePendingPreviewHash()
+    },
     onOpenExternal: openExternalUrl,
     onResolveError: () => showTransientNotice('无法解析该本地链接'),
   })

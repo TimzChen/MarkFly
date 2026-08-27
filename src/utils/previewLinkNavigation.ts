@@ -9,7 +9,8 @@ import {
 
 export type PreviewLinkNavigationOptions = {
   getCurrentFilePath: () => string
-  onOpenFile: (path: string) => void | Promise<void>
+  /** hash：打开文件后滚到对应标题（EXAMPLE.md#第-7-章-…） */
+  onOpenFile: (path: string, hash?: string) => void | Promise<void>
   /** http(s) / mailto 外链：系统浏览器打开 */
   onOpenExternal?: (url: string) => void | Promise<void>
   /** 本地路径解析失败时的提示（可选） */
@@ -54,13 +55,50 @@ function resolveLocalLinkPath(pathPart: string, currentFilePath: string): string
   return resolveMarkdownAssetPath(currentFilePath, trimmed)
 }
 
-function scrollToAnchor(previewRoot: HTMLElement, hash: string) {
-  if (!hash) return
-  const target =
-    previewRoot.querySelector(`#${CSS.escape(hash)}`) ??
-    previewRoot.querySelector(`[id="${hash}"]`) ??
-    previewRoot.querySelector(`#user-content-${CSS.escape(hash)}`)
-  if (!target) return
+function normalizeLocalFilePath(path: string): string {
+  return path.trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+}
+
+function isSameLocalFilePath(left: string, right: string): boolean {
+  if (!left || !right) return false
+  return normalizeLocalFilePath(left) === normalizeLocalFilePath(right)
+}
+
+function decodeAnchorHash(hash: string): string {
+  const trimmed = hash.trim()
+  if (!trimmed) return ''
+  try {
+    return decodeURIComponent(trimmed)
+  } catch {
+    return trimmed
+  }
+}
+
+function findAnchorTarget(previewRoot: HTMLElement, hash: string): Element | null {
+  const id = decodeAnchorHash(hash)
+  if (!id) return null
+
+  const candidates = [id]
+  if (id.startsWith('user-content-')) {
+    candidates.push(id.slice('user-content-'.length))
+  } else {
+    candidates.push(`user-content-${id}`)
+  }
+
+  for (const candidate of candidates) {
+    const target = previewRoot.querySelector(`#${CSS.escape(candidate)}`)
+    if (target) return target
+  }
+  return null
+}
+
+export function scrollPreviewToAnchor(
+  previewRoot: HTMLElement,
+  hash: string,
+  behavior: ScrollBehavior = 'smooth'
+): boolean {
+  const target = findAnchorTarget(previewRoot, hash)
+  if (!target) return false
 
   const scrollRoot =
     (previewRoot.closest('.markfly-preview-viewer, .bytemd-preview') as HTMLElement | null) ??
@@ -69,7 +107,8 @@ function scrollToAnchor(previewRoot: HTMLElement, hash: string) {
   const targetRect = (target as HTMLElement).getBoundingClientRect()
   const nextTop = targetRect.top - rootRect.top + scrollRoot.scrollTop
   const maxScroll = Math.max(0, scrollRoot.scrollHeight - scrollRoot.clientHeight)
-  scrollRoot.scrollTo({ top: Math.min(Math.max(0, nextTop), maxScroll), behavior: 'smooth' })
+  scrollRoot.scrollTo({ top: Math.min(Math.max(0, nextTop), maxScroll), behavior })
+  return true
 }
 
 /**
@@ -134,7 +173,7 @@ export function bindPreviewLinkNavigation(
     const { pathPart, hash } = splitHref(trimmed)
 
     if (!pathPart || pathPart === '.') {
-      scrollToAnchor(previewRoot, hash)
+      scrollPreviewToAnchor(previewRoot, hash)
       return
     }
 
@@ -145,7 +184,13 @@ export function bindPreviewLinkNavigation(
       return
     }
 
-    await options.onOpenFile(resolved)
+    // 当前文件 + 锚点：不必重开，直接滚
+    if (hash && isSameLocalFilePath(options.getCurrentFilePath(), resolved)) {
+      scrollPreviewToAnchor(previewRoot, hash)
+      return
+    }
+
+    await options.onOpenFile(resolved, hash || undefined)
   }
 
   // 捕获阶段：避免 WebView 先导航自定义协议导致点击失效
