@@ -2,6 +2,7 @@
 // 基于 Tauri + Vue + ByteMD 构建
 
 mod file_watcher;
+mod instance_guard;
 
 use std::fs;
 use std::path::PathBuf;
@@ -301,6 +302,12 @@ fn focus_main_window(app: &tauri::AppHandle) {
     }
 }
 
+fn handle_second_instance(app: &tauri::AppHandle, args: Vec<String>) {
+    let paths = resolve_open_files(app, collect_paths_from_args(args.into_iter().skip(1)));
+    dispatch_open_files(app, paths);
+    focus_main_window(app);
+}
+
 // Tauri 命令：获取应用信息
 #[tauri::command]
 fn get_app_info() -> serde_json::Value {
@@ -428,12 +435,17 @@ pub fn run() {
             file_watcher::sync_file_watches
         ]);
 
-    #[cfg(desktop)]
+    #[cfg(windows)]
+    {
+        builder = builder.plugin(instance_guard::init(|app, args, _cwd| {
+            handle_second_instance(app, args);
+        }));
+    }
+
+    #[cfg(all(desktop, not(windows)))]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            let paths = resolve_open_files(app, collect_paths_from_args(args.into_iter().skip(1)));
-            dispatch_open_files(app, paths);
-            focus_main_window(app);
+            handle_second_instance(app, args);
         }));
     }
 
@@ -450,6 +462,13 @@ pub fn run() {
                     // 仅同步 boot 数据；渲染由 boot.js 根据 __MARKFLY_BOOT_DISMISSED__ 决定是否跳过
                     inject_boot_data(webview);
                     show_main_window(webview.app_handle());
+                    #[cfg(windows)]
+                    {
+                        let app = webview.app_handle().clone();
+                        let _ = app.clone().run_on_main_thread(move || {
+                            instance_guard::cache_main_window_hwnd(&app);
+                        });
+                    }
                 }
             }
         })
@@ -460,6 +479,12 @@ pub fn run() {
                     app.handle(),
                     collect_paths_from_args(std::env::args().skip(1)),
                 );
+            }
+
+            #[cfg(windows)]
+            {
+                instance_guard::cache_main_window_hwnd(app.handle());
+                instance_guard::spawn_self_watchdog();
             }
 
             let app_handle = app.handle().clone();
@@ -485,18 +510,22 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app, event| {
-            #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Opened { urls } = event {
-                let paths = urls
-                    .into_iter()
-                    .filter_map(|url| url.to_file_path().ok())
-                    .collect::<Vec<_>>();
-                let valid_paths = resolve_open_files(app, paths);
-                dispatch_open_files(app, valid_paths);
+            match event {
+                tauri::RunEvent::ExitRequested { .. } => {
+                    instance_guard::schedule_force_exit();
+                }
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Opened { urls } => {
+                    let paths = urls
+                        .into_iter()
+                        .filter_map(|url| url.to_file_path().ok())
+                        .collect::<Vec<_>>();
+                    let valid_paths = resolve_open_files(app, paths);
+                    dispatch_open_files(app, valid_paths);
+                }
+                _ => {}
             }
             #[cfg(not(target_os = "macos"))]
-            {
-                let _ = (app, event);
-            }
+            let _ = app;
         });
 }
