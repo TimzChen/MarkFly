@@ -685,13 +685,16 @@ const loadHeavyPlugins = async () => {
 
   heavyPluginsLoading = (async () => {
     await loadMediumPlugins()
-    const [{ createMathPlugin }, { default: mermaid }] = await Promise.all([
+    const [{ createMathPlugin }, { createMermaidPlugin }] = await Promise.all([
       import('./utils/mathPlugin'),
-      import('@bytemd/plugin-mermaid'),
+      import('./utils/mermaidPlugin'),
       import('katex/dist/katex.css'),
     ])
-    const mathPlugin = await createMathPlugin()
-    plugins.value = [...plugins.value, mathPlugin, mermaid()]
+    const [mathPlugin, mermaidPlugin] = await Promise.all([
+      createMathPlugin(),
+      createMermaidPlugin(),
+    ])
+    plugins.value = [...plugins.value, mathPlugin, mermaidPlugin]
     heavyPluginsLoaded = true
   })()
 

@@ -43,6 +43,12 @@
   --table-stripe-bg: #f9fafb;
   --table-header-bg: #f5f6f8;
   --table-border: #e9edf1;
+
+  --mermaid-node-bg: #ffffff;
+  --mermaid-node-border: #c8c8c8;
+  --mermaid-cluster-bg: #f4f4f4;
+  --mermaid-cluster-border: #d4d4d4;
+  --mermaid-line: #666666;
 }
 
 /* 深色主题 */
@@ -89,6 +95,12 @@
   --table-stripe-bg: #232327;
   --table-header-bg: #262629;
   --table-border: #34343a;
+
+  --mermaid-node-bg: #2d2d30;
+  --mermaid-node-border: #5a5a5a;
+  --mermaid-cluster-bg: #252526;
+  --mermaid-cluster-border: #3e3e42;
+  --mermaid-line: #9a9a9a;
 }
 
 /* 全局样式重置 */
@@ -442,6 +454,51 @@ html, body {
 
 .markfly-preview-viewer.markdown-body a {
   color: var(--accent-color);
+}
+
+/* Mermaid：贴近 Cursor 的灰底圆角，避免 github-markdown-css 改掉 SVG 颜色 */
+.markfly-mermaid,
+.bytemd-mermaid {
+  margin: 16px 0;
+  overflow-x: auto;
+  line-height: initial;
+}
+
+.markfly-mermaid svg,
+.bytemd-mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.markfly-mermaid .node rect,
+.markfly-mermaid .node polygon,
+.bytemd-mermaid .node rect,
+.bytemd-mermaid .node polygon {
+  fill: var(--mermaid-node-bg, #ffffff) !important;
+  stroke: var(--mermaid-node-border, #c8c8c8) !important;
+}
+
+.markfly-mermaid .cluster rect,
+.bytemd-mermaid .cluster rect {
+  fill: var(--mermaid-cluster-bg, #f4f4f4) !important;
+  stroke: var(--mermaid-cluster-border, #d4d4d4) !important;
+}
+
+.markfly-mermaid .edgePath .path,
+.markfly-mermaid .flowchart-link,
+.bytemd-mermaid .edgePath .path,
+.bytemd-mermaid .flowchart-link {
+  stroke: var(--mermaid-line, #666666) !important;
+}
+
+.markfly-mermaid-error {
+  margin: 12px 0;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--code-bg);
+  color: var(--danger-color);
+  white-space: pre-wrap;
+  font-size: 13px;
 }
 
 .bytemd-preview .markdown-body img:not(a img),
