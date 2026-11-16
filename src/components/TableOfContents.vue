@@ -1,5 +1,5 @@
 <template>
-  <aside class="toc-panel">
+  <aside class="toc-panel" :class="{ collapsed }" :style="panelStyle" :aria-hidden="collapsed">
     <div class="toc-header">
       <div class="header-title">
         <span class="header-icon" v-html="toolbarIcons.toc" />
@@ -37,10 +37,26 @@ interface Heading {
   level: number
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   content: string
   scrollRoot?: HTMLElement | null
-}>()
+  collapsed?: boolean
+  width?: number
+}>(), {
+  collapsed: false,
+  width: 250,
+})
+
+const panelStyle = computed(() => {
+  if (props.collapsed) {
+    return { width: '0px', minWidth: '0px', flexBasis: '0px' }
+  }
+  return {
+    width: `${props.width}px`,
+    minWidth: `${props.width}px`,
+    flexBasis: `${props.width}px`,
+  }
+})
 
 const emit = defineEmits<{
   close: []
@@ -92,14 +108,27 @@ const scrollToHeading = (index: number) => {
 
 <style scoped>
 .toc-panel {
-  width: 250px;
-  flex: 0 0 250px;
+  flex: 0 0 auto;
   background: var(--bg-secondary);
   color: var(--text-primary);
   display: flex;
   flex-direction: column;
-  border-left: 1px solid var(--border-color);
-  transition: background-color 0.3s ease, color 0.3s ease;
+  border-right: 1px solid var(--border-color);
+  overflow: hidden;
+  transition:
+    width 0.2s ease,
+    min-width 0.2s ease,
+    flex-basis 0.2s ease,
+    opacity 0.2s ease,
+    border-color 0.2s ease,
+    background-color 0.3s ease,
+    color 0.3s ease;
+}
+
+.toc-panel.collapsed {
+  opacity: 0;
+  border-right-color: transparent;
+  pointer-events: none;
 }
 
 .toc-header {

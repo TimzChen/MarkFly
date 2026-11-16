@@ -1,5 +1,5 @@
 <template>
-  <div class="file-tree" :class="{ collapsed }" :aria-hidden="collapsed">
+  <div class="file-tree" :class="{ collapsed }" :style="panelStyle" :aria-hidden="collapsed">
     <div class="file-tree-header">
       <div class="header-title">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
@@ -43,18 +43,29 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
+
 interface FileItem {
   name: string
   content: string
   path: string
 }
 
-withDefaults(defineProps<{
+const props = withDefaults(defineProps<{
   files: FileItem[]
   activeFile: string
   collapsed?: boolean
+  width?: number
 }>(), {
-  collapsed: false
+  collapsed: false,
+  width: 280,
+})
+
+const panelStyle = computed(() => {
+  if (props.collapsed) {
+    return { width: '0px', minWidth: '0px' }
+  }
+  return { width: `${props.width}px`, minWidth: `${props.width}px` }
 })
 
 defineEmits<{
@@ -67,23 +78,19 @@ defineEmits<{
 
 <style scoped>
 .file-tree {
-  width: 280px;
-  min-width: 280px;
   background: var(--bg-secondary);
   color: var(--text-primary);
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border-color);
+  border-left: 1px solid var(--border-color);
   transition: width 0.2s ease, min-width 0.2s ease, opacity 0.2s ease, border-color 0.2s ease;
   overflow: hidden;
   flex-shrink: 0;
 }
 
 .file-tree.collapsed {
-  width: 0;
-  min-width: 0;
   opacity: 0;
-  border-right-color: transparent;
+  border-left-color: transparent;
   pointer-events: none;
 }
 

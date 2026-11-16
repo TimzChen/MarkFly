@@ -1,43 +1,53 @@
 <template>
   <div class="markfly-app">
     <!-- 主编辑区域 -->
-    <div class="app-body" ref="appBodyRef">
-      <!-- 左侧文件树 -->
-      <FileTree 
-        v-if="showDeferredChrome"
-        :files="files"
-        :activeFile="currentFilePath"
-        :collapsed="sidebarCollapsed"
-        @selectFile="selectFile"
-        @newFile="createNewFile"
-        @openFolder="openFolder"
-        @closeFile="closeFile"
+    <div class="app-body" ref="appBodyRef" :class="{ 'is-resizing-panels': !!resizingPanel }">
+      <TableOfContents
+        v-if="showTocRail"
+        :content="previewSource"
+        :scroll-root="previewBodyRef"
+        :collapsed="!previewTocVisible"
+        :width="tocWidth"
+        @close="persistPreviewToc(false)"
+      />
+
+      <div
+        v-if="showTocRail && previewTocVisible"
+        class="panel-resize-handle is-left"
+        :class="{ dragging: resizingPanel === 'toc' }"
+        :style="{ left: `${tocWidth}px` }"
+        title="拖动调整目录宽度"
+        @pointerdown="onResizePointerDown('toc', $event)"
+        @pointermove="onResizePointerMove"
+        @pointerup="onResizePointerUp"
+        @pointercancel="onResizePointerUp"
       />
 
       <button
-        class="sidebar-toggle-btn"
+        v-if="showTocRail"
+        class="sidebar-toggle-btn is-left"
         :class="{
-          dragging: isDraggingSidebarBtn,
-          'is-collapsed': sidebarCollapsed,
-          'is-expanded': !sidebarCollapsed,
+          dragging: isDraggingRailBtn,
+          'is-collapsed': !previewTocVisible,
+          'is-expanded': previewTocVisible,
         }"
-        :style="sidebarToggleBtnStyle"
-        :title="sidebarCollapsed ? '显示侧边栏 (可拖动，Ctrl+B)' : '隐藏侧边栏 (可拖动，Ctrl+B)'"
-        @pointerdown="onSidebarBtnPointerDown"
-        @pointermove="onSidebarBtnPointerMove"
-        @pointerup="onSidebarBtnPointerUp"
-        @pointercancel="onSidebarBtnPointerUp"
-        @click="onSidebarBtnClick"
+        :style="tocToggleBtnStyle"
+        :title="previewTocVisible ? '隐藏目录 (可拖动)' : '显示目录 (可拖动)'"
+        @pointerdown="onRailBtnPointerDown"
+        @pointermove="onRailBtnPointerMove"
+        @pointerup="onRailBtnPointerUp"
+        @pointercancel="onRailBtnPointerUp"
+        @click="onTocRailBtnClick"
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
           <polyline
-            :points="sidebarCollapsed ? '9,6 15,12 9,18' : '15,6 9,12 15,18'"
+            :points="previewTocVisible ? '15,6 9,12 15,18' : '9,6 15,12 9,18'"
             stroke="currentColor"
             stroke-width="2"
           />
         </svg>
       </button>
-      
+
       <!-- 中央编辑区域 -->
       <div class="editor-container">
         <div
@@ -207,12 +217,6 @@
                 class="markfly-preview-viewer markdown-body"
                 v-html="previewHtml"
               />
-              <TableOfContents
-                v-if="previewTocVisible"
-                :content="previewSource"
-                :scroll-root="previewBodyRef"
-                @close="previewTocVisible = false"
-              />
             </div>
             <component
               v-if="!usePreviewViewer && EditorComponent"
@@ -246,14 +250,63 @@
                 <li>使用 <kbd>Ctrl/Cmd + O</kbd> 打开文件</li>
                 <li>支持实时预览和语法高亮</li>
                 <li>内置数学公式和图表支持</li>
-                <li>使用 <kbd>Ctrl/Cmd + B</kbd> 或视图菜单显示/隐藏侧边栏</li>
-                <li>点击左侧文件树或顶部标签栏切换文档</li>
+                <li>使用 <kbd>Ctrl/Cmd + B</kbd> 或视图菜单显示/隐藏知识库</li>
+                <li>点击右侧知识库或顶部标签栏切换文档</li>
               </ul>
             </div>
           </div>
           </div>
         </div>
       </div>
+
+      <button
+        v-if="showDeferredChrome"
+        class="sidebar-toggle-btn is-right"
+        :class="{
+          dragging: isDraggingRailBtn,
+          'is-collapsed': sidebarCollapsed,
+          'is-expanded': !sidebarCollapsed,
+        }"
+        :style="fileTreeToggleBtnStyle"
+        :title="sidebarCollapsed ? '显示知识库 (可拖动，Ctrl+B)' : '隐藏知识库 (可拖动，Ctrl+B)'"
+        @pointerdown="onRailBtnPointerDown"
+        @pointermove="onRailBtnPointerMove"
+        @pointerup="onRailBtnPointerUp"
+        @pointercancel="onRailBtnPointerUp"
+        @click="onFileTreeRailBtnClick"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <polyline
+            :points="sidebarCollapsed ? '15,6 9,12 15,18' : '9,6 15,12 9,18'"
+            stroke="currentColor"
+            stroke-width="2"
+          />
+        </svg>
+      </button>
+
+      <div
+        v-if="showDeferredChrome && !sidebarCollapsed"
+        class="panel-resize-handle is-right"
+        :class="{ dragging: resizingPanel === 'files' }"
+        :style="{ right: `${fileTreeWidth}px` }"
+        title="拖动调整知识库宽度"
+        @pointerdown="onResizePointerDown('files', $event)"
+        @pointermove="onResizePointerMove"
+        @pointerup="onResizePointerUp"
+        @pointercancel="onResizePointerUp"
+      />
+
+      <FileTree
+        v-if="showDeferredChrome"
+        :files="files"
+        :activeFile="currentFilePath"
+        :collapsed="sidebarCollapsed"
+        :width="fileTreeWidth"
+        @selectFile="selectFile"
+        @newFile="createNewFile"
+        @openFolder="openFolder"
+        @closeFile="closeFile"
+      />
     </div>
 
     <!-- 状态栏（合并 ByteMD 内置状态，避免双行重复） -->
@@ -429,14 +482,28 @@ const ensureEditorComponent = async () => {
 const themeStore = useThemeStore()
 
 const SIDEBAR_STORAGE_KEY = 'markfly-sidebar-collapsed'
-const SIDEBAR_BTN_TOP_KEY = 'markfly-sidebar-btn-top'
+const RAIL_BTN_OFFSET_KEY = 'markfly-rail-btn-offset'
 const TOOLBAR_STORAGE_KEY = 'markfly-toolbar-collapsed'
 const PREVIEW_TOC_STORAGE_KEY = 'markfly-preview-toc-visible'
 const EDITOR_MODE_STORAGE_KEY = 'markfly-editor-mode'
 /** WebView 刷新后用于恢复已打开的磁盘文件列表 */
 const OPEN_SESSION_KEY = 'markfly-open-session'
-const SIDEBAR_WIDTH = 280
-const SIDEBAR_BTN_HEIGHT = 48
+const TOC_WIDTH_KEY = 'markfly-toc-width'
+const FILE_TREE_WIDTH_KEY = 'markfly-filetree-width'
+const TOC_WIDTH_DEFAULT = 250
+const FILE_TREE_WIDTH_DEFAULT = 280
+const PANEL_MIN_WIDTH = 160
+const EDITOR_MIN_WIDTH = 360
+const RAIL_BTN_HEIGHT = 48
+const RAIL_CENTER_SNAP_PX = 8
+
+type ResizePanel = 'toc' | 'files'
+
+const loadPanelWidth = (key: string, fallback: number) => {
+  const stored = localStorage.getItem(key)
+  const value = stored ? Number.parseInt(stored, 10) : NaN
+  return Number.isNaN(value) ? fallback : Math.max(PANEL_MIN_WIDTH, value)
+}
 
 type OpenSession = {
   paths: string[]
@@ -461,30 +528,35 @@ const loadEditorLayout = (): EditorLayoutMode => {
   return 'preview-only'
 }
 
-const loadSidebarBtnTop = (): number | null => {
-  const stored = localStorage.getItem(SIDEBAR_BTN_TOP_KEY)
-  if (!stored || stored === 'center') return null
+const loadRailBtnOffset = (): number => {
+  const stored = localStorage.getItem(RAIL_BTN_OFFSET_KEY)
+  if (!stored) return 0
   const value = Number.parseInt(stored, 10)
-  if (!Number.isNaN(value) && value >= 0) return value
-  return null
+  return Number.isNaN(value) ? 0 : value
 }
 
-const getCenteredSidebarBtnTop = () => {
+const getCenteredRailTop = () => {
   const bodyHeight = appBodyRef.value?.clientHeight ?? 600
-  return Math.max(0, (bodyHeight - SIDEBAR_BTN_HEIGHT) / 2)
+  return Math.max(0, (bodyHeight - RAIL_BTN_HEIGHT) / 2)
 }
 
 // 响应式数据
 const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_STORAGE_KEY) !== 'false')
 const isBootstrapping = ref(true)
 const showDeferredChrome = ref(false)
-const sidebarBtnTop = ref<number | null>(loadSidebarBtnTop())
+const railBtnOffset = ref(loadRailBtnOffset())
+const tocWidth = ref(loadPanelWidth(TOC_WIDTH_KEY, TOC_WIDTH_DEFAULT))
+const fileTreeWidth = ref(loadPanelWidth(FILE_TREE_WIDTH_KEY, FILE_TREE_WIDTH_DEFAULT))
+const resizingPanel = ref<ResizePanel | null>(null)
 const appBodyHeight = ref(0)
-const isDraggingSidebarBtn = ref(false)
+const isDraggingRailBtn = ref(false)
 const appBodyRef = ref<HTMLElement | null>(null)
-let sidebarBtnDragStartY = 0
-let sidebarBtnDragStartTop = 0
-let sidebarBtnDidDrag = false
+let resizeStartX = 0
+let resizeStartWidth = 0
+let railBtnDragStartY = 0
+let railBtnDragStartTop = 0
+let railBtnDidDrag = false
+let railBodyObserver: ResizeObserver | null = null
 const toolbarCollapsed = ref(localStorage.getItem(TOOLBAR_STORAGE_KEY) === 'true')
 const previewTocVisible = ref(localStorage.getItem(PREVIEW_TOC_STORAGE_KEY) === 'true')
 const files = ref<FileItem[]>([])
@@ -557,16 +629,46 @@ const clearByteMdToolbarFromHost = () => {
   toolbarActionsRef.value?.querySelectorAll('.bytemd-toolbar').forEach((node) => node.remove())
 }
 
-const resolvedSidebarBtnTop = computed(() => {
+const showTocRail = computed(
+  () => showDeferredChrome.value && usePreviewViewer.value && !!currentFile.value
+)
+
+const clampRailBtnTop = (top: number) => {
+  const maxTop = Math.max(0, (appBodyRef.value?.clientHeight ?? 600) - RAIL_BTN_HEIGHT)
+  return Math.max(0, Math.min(maxTop, top))
+}
+
+const resolvedRailBtnTop = computed(() => {
   void appBodyHeight.value
-  if (sidebarBtnTop.value !== null) return sidebarBtnTop.value
-  return getCenteredSidebarBtnTop()
+  return clampRailBtnTop(getCenteredRailTop() + railBtnOffset.value)
 })
 
-const sidebarToggleBtnStyle = computed(() => ({
-  top: `${resolvedSidebarBtnTop.value}px`,
-  left: sidebarCollapsed.value ? '0px' : `${SIDEBAR_WIDTH}px`,
-}))
+const isRailBtnCentered = computed(() => railBtnOffset.value === 0)
+
+const railBtnTransform = (side: 'left' | 'right', expanded: boolean) => {
+  const x = expanded ? (side === 'left' ? '-100%' : '100%') : '0'
+  const y = isRailBtnCentered.value ? '-50%' : '0'
+  return `translate(${x}, ${y})`
+}
+
+const tocToggleBtnStyle = computed(() => {
+  const expanded = previewTocVisible.value
+  return {
+    top: isRailBtnCentered.value ? '50%' : `${resolvedRailBtnTop.value}px`,
+    left: expanded ? `${tocWidth.value}px` : '0px',
+    transform: railBtnTransform('left', expanded),
+  }
+})
+
+const fileTreeToggleBtnStyle = computed(() => {
+  const expanded = !sidebarCollapsed.value
+  return {
+    top: isRailBtnCentered.value ? '50%' : `${resolvedRailBtnTop.value}px`,
+    right: expanded ? `${fileTreeWidth.value}px` : '0px',
+    left: 'auto',
+    transform: railBtnTransform('right', expanded),
+  }
+})
 
 const mountToolbarToHeader = () => {
   if (!showUnifiedHeader.value || usePreviewViewer.value) return
@@ -970,45 +1072,106 @@ const toggleSidebar = () => {
   localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed.value))
 }
 
-const clampSidebarBtnTop = (top: number) => {
-  const maxTop = Math.max(0, (appBodyRef.value?.clientHeight ?? 600) - SIDEBAR_BTN_HEIGHT)
-  return Math.max(0, Math.min(maxTop, top))
+const persistPreviewToc = (visible: boolean) => {
+  previewTocVisible.value = visible
+  localStorage.setItem(PREVIEW_TOC_STORAGE_KEY, String(visible))
 }
 
-const onSidebarBtnPointerDown = (event: PointerEvent) => {
-  sidebarBtnDidDrag = false
-  isDraggingSidebarBtn.value = true
-  sidebarBtnDragStartY = event.clientY
-  sidebarBtnDragStartTop = resolvedSidebarBtnTop.value
+const onRailBtnPointerDown = (event: PointerEvent) => {
+  railBtnDidDrag = false
+  isDraggingRailBtn.value = true
+  railBtnDragStartY = event.clientY
+  railBtnDragStartTop = resolvedRailBtnTop.value
   ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
 }
 
-const onSidebarBtnPointerMove = (event: PointerEvent) => {
-  if (!isDraggingSidebarBtn.value) return
-  const deltaY = event.clientY - sidebarBtnDragStartY
-  if (Math.abs(deltaY) > 3) sidebarBtnDidDrag = true
-  sidebarBtnTop.value = clampSidebarBtnTop(sidebarBtnDragStartTop + deltaY)
+const onRailBtnPointerMove = (event: PointerEvent) => {
+  if (!isDraggingRailBtn.value) return
+  const deltaY = event.clientY - railBtnDragStartY
+  if (Math.abs(deltaY) > 3) railBtnDidDrag = true
+  const nextTop = clampRailBtnTop(railBtnDragStartTop + deltaY)
+  const offset = nextTop - getCenteredRailTop()
+  railBtnOffset.value = Math.abs(offset) < RAIL_CENTER_SNAP_PX ? 0 : offset
 }
 
-const onSidebarBtnPointerUp = (event: PointerEvent) => {
-  if (!isDraggingSidebarBtn.value) return
-  isDraggingSidebarBtn.value = false
+const onRailBtnPointerUp = (event: PointerEvent) => {
+  if (!isDraggingRailBtn.value) return
+  isDraggingRailBtn.value = false
   ;(event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId)
-  if (sidebarBtnTop.value !== null) {
-    localStorage.setItem(SIDEBAR_BTN_TOP_KEY, String(sidebarBtnTop.value))
-  }
+  localStorage.setItem(RAIL_BTN_OFFSET_KEY, String(railBtnOffset.value))
 }
 
-const onSidebarBtnClick = () => {
-  if (sidebarBtnDidDrag) return
+const onTocRailBtnClick = () => {
+  if (railBtnDidDrag) return
+  persistPreviewToc(!previewTocVisible.value)
+}
+
+const onFileTreeRailBtnClick = () => {
+  if (railBtnDidDrag) return
   toggleSidebar()
+}
+
+const otherVisiblePanelWidth = (panel: ResizePanel) => {
+  if (panel === 'toc') {
+    return showDeferredChrome.value && !sidebarCollapsed.value ? fileTreeWidth.value : 0
+  }
+  return showTocRail.value && previewTocVisible.value ? tocWidth.value : 0
+}
+
+const clampPanelWidth = (panel: ResizePanel, width: number) => {
+  const bodyWidth = appBodyRef.value?.clientWidth ?? 1200
+  const maxWidth = Math.max(
+    PANEL_MIN_WIDTH,
+    bodyWidth - otherVisiblePanelWidth(panel) - EDITOR_MIN_WIDTH
+  )
+  return Math.max(PANEL_MIN_WIDTH, Math.min(maxWidth, Math.round(width)))
+}
+
+const persistPanelWidth = (panel: ResizePanel) => {
+  if (panel === 'toc') {
+    localStorage.setItem(TOC_WIDTH_KEY, String(tocWidth.value))
+    return
+  }
+  localStorage.setItem(FILE_TREE_WIDTH_KEY, String(fileTreeWidth.value))
+}
+
+const onResizePointerDown = (panel: ResizePanel, event: PointerEvent) => {
+  resizingPanel.value = panel
+  resizeStartX = event.clientX
+  resizeStartWidth = panel === 'toc' ? tocWidth.value : fileTreeWidth.value
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+}
+
+const onResizePointerMove = (event: PointerEvent) => {
+  const panel = resizingPanel.value
+  if (!panel) return
+  const deltaX = event.clientX - resizeStartX
+  if (panel === 'toc') {
+    tocWidth.value = clampPanelWidth('toc', resizeStartWidth + deltaX)
+    return
+  }
+  fileTreeWidth.value = clampPanelWidth('files', resizeStartWidth - deltaX)
+}
+
+const onResizePointerUp = (event: PointerEvent) => {
+  const panel = resizingPanel.value
+  if (!panel) return
+  resizingPanel.value = null
+  if ((event.currentTarget as HTMLElement).hasPointerCapture(event.pointerId)) {
+    ;(event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId)
+  }
+  persistPanelWidth(panel)
 }
 
 const clampSidebarBtnPosition = () => {
   appBodyHeight.value = appBodyRef.value?.clientHeight ?? 0
-  if (sidebarBtnTop.value !== null) {
-    sidebarBtnTop.value = clampSidebarBtnTop(sidebarBtnTop.value)
+  if (railBtnOffset.value !== 0) {
+    const centered = getCenteredRailTop()
+    const nextTop = clampRailBtnTop(centered + railBtnOffset.value)
+    railBtnOffset.value = nextTop - centered
   }
+  tocWidth.value = clampPanelWidth('toc', tocWidth.value)
+  fileTreeWidth.value = clampPanelWidth('files', fileTreeWidth.value)
 }
 
 const toggleToolbar = () => {
@@ -1017,8 +1180,7 @@ const toggleToolbar = () => {
 }
 
 const togglePreviewToc = () => {
-  previewTocVisible.value = !previewTocVisible.value
-  localStorage.setItem(PREVIEW_TOC_STORAGE_KEY, String(previewTocVisible.value))
+  persistPreviewToc(!previewTocVisible.value)
 }
 
 const togglePreview = () => {
@@ -1720,6 +1882,10 @@ const setupDeferredAppServices = async () => {
   nextTick(setupToolbarObserver)
   clampSidebarBtnPosition()
   window.addEventListener('resize', clampSidebarBtnPosition)
+  if (appBodyRef.value) {
+    railBodyObserver = new ResizeObserver(() => clampSidebarBtnPosition())
+    railBodyObserver.observe(appBodyRef.value)
+  }
 }
 
 watch(
@@ -1788,6 +1954,8 @@ onUnmounted(() => {
   window.removeEventListener('blur', onWindowClickCloseTabMenu)
   window.removeEventListener('beforeunload', persistOpenSession)
   window.removeEventListener('resize', clampSidebarBtnPosition)
+  railBodyObserver?.disconnect()
+  railBodyObserver = null
   unlistenFileChanged?.()
   toolbarObserver?.disconnect()
   unbindPreviewImageZoom(previewBodyRef.value)
@@ -2123,30 +2291,76 @@ onUnmounted(() => {
   padding: 0;
   transition:
     left 0.2s ease,
+    right 0.2s ease,
+    transform 0.2s ease,
     background-color 0.2s ease,
     color 0.2s ease;
 }
 
-.sidebar-toggle-btn.is-collapsed {
+.sidebar-toggle-btn.is-left.is-collapsed {
   border-left: none;
   border-radius: 0 6px 6px 0;
-  transform: none;
 }
 
-.sidebar-toggle-btn.is-expanded {
+.sidebar-toggle-btn.is-left.is-expanded {
   border-right: none;
   border-radius: 6px 0 0 6px;
-  transform: translateX(-100%);
+}
+
+.sidebar-toggle-btn.is-right.is-collapsed {
+  border-right: none;
+  border-radius: 6px 0 0 6px;
+}
+
+.sidebar-toggle-btn.is-right.is-expanded {
+  border-left: none;
+  border-radius: 0 6px 6px 0;
 }
 
 .sidebar-toggle-btn.dragging {
   cursor: grabbing;
-  transition: left 0.2s ease;
+  transition: none;
 }
 
 .sidebar-toggle-btn:hover {
   background: var(--hover-bg);
   color: var(--text-primary);
+}
+
+.panel-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  z-index: 25;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.panel-resize-handle.is-left {
+  transform: translateX(-50%);
+}
+
+.panel-resize-handle.is-right {
+  transform: translateX(50%);
+}
+
+.panel-resize-handle:hover,
+.panel-resize-handle.dragging {
+  background: var(--accent-color);
+  opacity: 0.4;
+}
+
+.app-body.is-resizing-panels {
+  user-select: none;
+  cursor: col-resize;
+}
+
+.app-body.is-resizing-panels :deep(.file-tree),
+.app-body.is-resizing-panels :deep(.toc-panel),
+.app-body.is-resizing-panels .sidebar-toggle-btn {
+  transition: none;
 }
 
 .editor-container {
