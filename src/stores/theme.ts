@@ -3,8 +3,12 @@ import { defineStore } from 'pinia'
 
 export type ThemeMode = 'light' | 'dark' | 'auto'
 
+/** 用户点过状态栏或在设置里选过才写入；没有记录就跟随系统 */
+const THEME_STORAGE_KEY = 'markfly-theme-mode'
+const LEGACY_THEME_STORAGE_KEY = 'theme-mode'
+
 export const useThemeStore = defineStore('theme', () => {
-  // 状态
+  // 未选择时跟随系统，不在初始化时写入 storage
   const mode = ref<ThemeMode>('auto')
   const systemPrefersDark = ref(false)
 
@@ -23,18 +27,13 @@ export const useThemeStore = defineStore('theme', () => {
   // 方法
   const setTheme = (newMode: ThemeMode) => {
     mode.value = newMode
-    localStorage.setItem('theme-mode', newMode)
+    localStorage.setItem(THEME_STORAGE_KEY, newMode)
     applyTheme()
   }
 
+  /** 用户主动切换：离开跟随系统，钉成当前画面的反色 */
   const toggleTheme = () => {
-    if (mode.value === 'light') {
-      setTheme('dark')
-    } else if (mode.value === 'dark') {
-      setTheme('auto')
-    } else {
-      setTheme('light')
-    }
+    setTheme(isDark.value ? 'light' : 'dark')
   }
 
   const applyTheme = () => {
@@ -88,24 +87,25 @@ export const useThemeStore = defineStore('theme', () => {
     }
   }
 
+  let systemThemeListenerBound = false
+
   const initTheme = () => {
-    // 检测系统主题偏好
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
     systemPrefersDark.value = mediaQuery.matches
-    
-    // 监听系统主题变化
-    mediaQuery.addEventListener('change', (e) => {
-      systemPrefersDark.value = e.matches
-      if (mode.value === 'auto') {
-        applyTheme()
-      }
-    })
 
-    // 从localStorage恢复主题设置
-    const savedMode = localStorage.getItem('theme-mode') as ThemeMode
-    if (savedMode && ['light', 'dark', 'auto'].includes(savedMode)) {
+    if (!systemThemeListenerBound) {
+      systemThemeListenerBound = true
+      mediaQuery.addEventListener('change', (e) => {
+        systemPrefersDark.value = e.matches
+        if (mode.value === 'auto') applyTheme()
+      })
+    }
+
+    const savedMode = localStorage.getItem(THEME_STORAGE_KEY)
+    if (savedMode === 'light' || savedMode === 'dark' || savedMode === 'auto') {
       mode.value = savedMode
     }
+    localStorage.removeItem(LEGACY_THEME_STORAGE_KEY)
 
     applyTheme()
   }

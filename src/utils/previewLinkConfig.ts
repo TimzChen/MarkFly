@@ -1,6 +1,6 @@
 import type { BytemdPlugin } from 'bytemd'
 import type { Schema } from 'hast-util-sanitize'
-import type { Link } from 'mdast'
+import type { Link, Root } from 'mdast'
 import { visit } from 'unist-util-visit'
 
 /** 自定义协议：sanitize 白名单内保留本地路径 href */
@@ -92,7 +92,7 @@ function normalizeLinkToMarkflyFile(url: string): string | null {
 export function createLocalFileLinksPlugin(): BytemdPlugin {
   return {
     remark: (processor) =>
-      processor.use(() => (tree) => {
+      processor.use(() => (tree: Root) => {
         visit(tree, 'link', (node: Link) => {
           if (!node.url) return
           const next = normalizeLinkToMarkflyFile(node.url)

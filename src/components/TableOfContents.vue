@@ -1,50 +1,52 @@
 <template>
   <aside class="toc-panel" :class="{ collapsed }" :style="panelStyle" :aria-hidden="collapsed">
-    <div class="toc-header">
-      <div class="header-title">
-        <span class="header-icon" v-html="toolbarIcons.toc" />
-        <span>目录</span>
-      </div>
-      <button type="button" class="toc-close-btn" title="关闭目录" @click="emit('close')">
-        <svg width="12" height="12" viewBox="0 0 48 48" fill="none">
-          <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="4" d="m8 8 32 32M8 40 40 8"/>
-        </svg>
-      </button>
-    </div>
-
-    <div class="toc-content">
+    <button type="button" class="toc-close-btn" title="关闭目录" @click="emit('close')">
+      <svg width="14" height="14" viewBox="0 0 48 48" fill="none">
+        <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="4" d="m8 8 32 32M8 40 40 8"/>
+      </svg>
+    </button>
+    <h2 class="toc-title">目录</h2>
+    <nav class="toc-content" aria-label="文档目录">
       <div v-if="headings.length === 0" class="toc-empty">暂无标题</div>
       <button
         v-for="(heading, index) in headings"
         :key="`${index}-${heading.text}`"
         type="button"
         class="toc-item"
-        :class="`level-${heading.level}`"
+        :class="{
+          'is-active': index === activeIndex,
+          'is-first': heading.level === minLevel,
+        }"
+        :style="{ paddingLeft: `${(heading.level - minLevel) * 16 + 8}px` }"
         @click="scrollToHeading(index)"
       >
         <span class="toc-text">{{ heading.text }}</span>
       </button>
-    </div>
+    </nav>
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { toolbarIcons } from '../utils/toolbarIcons'
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
 
-interface Heading {
+type Heading = {
   text: string
   level: number
 }
 
+type TocScrollRoot = HTMLElement | null | (() => HTMLElement | null)
+
 const props = withDefaults(defineProps<{
   content: string
-  scrollRoot?: HTMLElement | null
+  scrollRoot?: TocScrollRoot
+  /** 预览容器切换时（分屏 / 仅预览）重新绑定滚动高亮 */
+  syncKey?: string
   collapsed?: boolean
   width?: number
 }>(), {
   collapsed: false,
-  width: 250,
+  width: 280,
+  syncKey: '',
 })
 
 const panelStyle = computed(() => {
@@ -69,47 +71,117 @@ const extractHeadings = (markdown: string): Heading[] => {
   let inCodeFence = false
 
   for (const line of lines) {
-    // 围栏代码块（``` / ~~~），与缩进无关
     if (/^\s*(```|~~~)/.test(line)) {
       inCodeFence = !inCodeFence
       continue
     }
     if (inCodeFence) continue
-
     const match = line.match(/^(#{1,6})\s+(.+)$/)
     if (!match) continue
-
     matches.push({
       level: match[1].length,
       text: match[2].trim(),
     })
   }
-
   return matches
 }
 
 const headings = computed(() => extractHeadings(props.content))
+const minLevel = computed(() => {
+  if (headings.value.length === 0) return 1
+  return Math.min(...headings.value.map((item) => item.level))
+})
+const activeIndex = ref(0)
 
-const scrollToHeading = (index: number) => {
+const resolveScrollRoot = (): HTMLElement | null => {
   const root = props.scrollRoot
-  if (!root) return
+  return typeof root === 'function' ? root() : root ?? null
+}
 
-  const target = root.querySelectorAll('h1,h2,h3,h4,h5,h6')[index] as HTMLElement | undefined
-  if (!target) return
+const headingNodes = (root: HTMLElement) =>
+  root.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')
 
-  // 只滚动预览容器，避免 scrollIntoView 连带外层滚动；文末标题 clamp 到 maxScroll
+const headingOffsetInRoot = (root: HTMLElement, target: HTMLElement) => {
   const rootRect = root.getBoundingClientRect()
   const targetRect = target.getBoundingClientRect()
-  const nextTop = targetRect.top - rootRect.top + root.scrollTop
+  return targetRect.top - rootRect.top + root.scrollTop
+}
+
+const updateActiveFromScroll = () => {
+  const root = boundRoot
+  if (!root || headings.value.length === 0) return
+  const nodes = headingNodes(root)
+  if (nodes.length === 0) return
+  const rootTop = root.getBoundingClientRect().top
+  let current = 0
+  for (let index = 0; index < nodes.length; index += 1) {
+    if (nodes[index].getBoundingClientRect().top - rootTop <= 12) current = index
+    else break
+  }
+  activeIndex.value = Math.min(current, headings.value.length - 1)
+}
+
+const scrollToHeading = (index: number) => {
+  const root = resolveScrollRoot()
+  if (!root) return
+  const target = headingNodes(root)[index]
+  if (!target) return
+  activeIndex.value = index
+  const nextTop = headingOffsetInRoot(root, target)
   const maxScroll = Math.max(0, root.scrollHeight - root.clientHeight)
   root.scrollTo({ top: Math.min(Math.max(0, nextTop), maxScroll), behavior: 'smooth' })
 }
+
+let boundRoot: HTMLElement | null = null
+let retryTimer = 0
+let retryCount = 0
+
+const unbindScroll = () => {
+  window.clearTimeout(retryTimer)
+  boundRoot?.removeEventListener('scroll', updateActiveFromScroll)
+  boundRoot = null
+}
+
+const bindScroll = () => {
+  unbindScroll()
+  const root = resolveScrollRoot()
+  const hasHeadings = headings.value.length > 0
+  const nodesReady = !!root && (!hasHeadings || headingNodes(root).length > 0)
+  if (!root || !nodesReady) {
+    if (retryCount < 20) {
+      retryCount += 1
+      retryTimer = window.setTimeout(bindScroll, 150)
+    }
+    return
+  }
+  retryCount = 0
+  boundRoot = root
+  root.addEventListener('scroll', updateActiveFromScroll, { passive: true })
+  updateActiveFromScroll()
+}
+
+watch(
+  () => [props.content, props.collapsed, props.syncKey] as const,
+  async () => {
+    retryCount = 0
+    if (props.collapsed) {
+      unbindScroll()
+      return
+    }
+    await nextTick()
+    bindScroll()
+  },
+  { immediate: true }
+)
+
+onUnmounted(unbindScroll)
 </script>
 
 <style scoped>
 .toc-panel {
+  position: relative;
   flex: 0 0 auto;
-  background: var(--bg-secondary);
+  background: var(--bg-primary);
   color: var(--text-primary);
   display: flex;
   flex-direction: column;
@@ -131,39 +203,24 @@ const scrollToHeading = (index: number) => {
   pointer-events: none;
 }
 
-.toc-header {
-  height: 35px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 8px 0 12px;
-  border-bottom: 1px solid var(--border-color);
-  font-size: 11px;
+.toc-title {
+  margin: 24px 16px 8px;
+  font-size: 16px;
   font-weight: 600;
-  letter-spacing: 0.5px;
-  flex-shrink: 0;
-}
-
-.header-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  line-height: 1.3;
   color: var(--text-primary);
 }
 
-.header-icon :deep(svg) {
-  width: 14px;
-  height: 14px;
-  display: block;
-}
-
 .toc-close-btn {
-  width: 22px;
-  height: 22px;
+  position: absolute;
+  top: 10px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  border-radius: 3px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -171,69 +228,51 @@ const scrollToHeading = (index: number) => {
 }
 
 .toc-close-btn:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
+  color: var(--accent-color);
 }
 
 .toc-content {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 8px 0;
+  padding: 0 8px 16px;
 }
 
 .toc-empty {
-  padding: 12px;
-  font-size: 12px;
+  padding: 8px;
+  font-size: 13px;
   color: var(--text-secondary);
 }
 
 .toc-item {
+  display: block;
   width: 100%;
   border: none;
   background: transparent;
   text-align: left;
-  padding: 3px 12px;
+  padding-top: 0;
+  padding-right: 8px;
+  padding-bottom: 0;
+  margin-bottom: 4px;
   cursor: pointer;
-  font-size: 13px;
-  line-height: 1.4;
-  color: var(--text-primary);
-  transition: background-color 0.2s;
-  border-left: 2px solid transparent;
+  font-size: 14px;
+  line-height: 2;
+  color: var(--text-secondary);
+  border-radius: 4px;
 }
 
 .toc-item:hover {
   background: var(--hover-bg);
-  border-left-color: var(--accent-color);
 }
 
-.toc-item.level-1 {
-  padding-left: 12px;
-  font-weight: 600;
+.toc-item.is-first {
+  font-weight: 500;
+  color: var(--text-primary);
 }
 
-.toc-item.level-2 {
-  padding-left: 24px;
-}
-
-.toc-item.level-3 {
-  padding-left: 36px;
-  font-size: 12px;
-}
-
-.toc-item.level-4 {
-  padding-left: 48px;
-  font-size: 12px;
-}
-
-.toc-item.level-5 {
-  padding-left: 60px;
-  font-size: 11px;
-}
-
-.toc-item.level-6 {
-  padding-left: 72px;
-  font-size: 11px;
+.toc-item.is-active {
+  color: var(--accent-color);
+  background: var(--hover-bg);
 }
 
 .toc-text {

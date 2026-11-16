@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-set-app-menu-visible"
+description = "Allows hiding and restoring the native application menu."
+commands.allow = ["set_app_menu_visible"]

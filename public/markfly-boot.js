@@ -142,7 +142,7 @@
   }
 
   function resolveBootDark() {
-    const mode = localStorage.getItem('theme-mode')
+    const mode = localStorage.getItem('markfly-theme-mode')
     if (mode === 'dark') return true
     if (mode === 'light') return false
     return window.matchMedia('(prefers-color-scheme: dark)').matches

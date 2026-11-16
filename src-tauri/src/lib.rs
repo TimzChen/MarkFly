@@ -25,6 +25,10 @@ struct PendingOpenFile {
 
 struct PendingOpenFiles(Mutex<Vec<PendingOpenFile>>);
 
+struct RecentMenuItems(Mutex<Vec<String>>);
+/// 全屏时收起原生菜单；为 true 时不要把菜单再画回去（例如刷新「最近打开」时）
+struct HideAppMenu(Mutex<bool>);
+
 const BOOT_PREVIEW_MAX_BYTES: usize = 512 * 1024;
 
 #[derive(serde::Serialize)]
@@ -200,7 +204,68 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
-fn setup_app_menus(app: &tauri::AppHandle) -> tauri::Result<()> {
+fn recent_menu_label(path: &str) -> String {
+    let path = std::path::Path::new(path);
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("未命名.md");
+    let parent = path
+        .parent()
+        .and_then(|value| value.file_name())
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    let raw = if parent.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name} — {parent}")
+    };
+    let raw = raw.replace('&', "&&");
+    let char_count = raw.chars().count();
+    if char_count > 48 {
+        format!("{}…", raw.chars().take(47).collect::<String>())
+    } else {
+        raw
+    }
+}
+
+fn build_recent_submenu(
+    app: &tauri::AppHandle,
+) -> tauri::Result<tauri::menu::Submenu<tauri::Wry>> {
+    let state = app.state::<RecentMenuItems>();
+    let recents = state.0.lock().unwrap().clone();
+    let mut builder = SubmenuBuilder::new(app, "最近打开");
+
+    if recents.is_empty() {
+        let empty = MenuItemBuilder::with_id("recent-empty", "暂无记录")
+            .enabled(false)
+            .build(app)?;
+        builder = builder.item(&empty);
+    } else {
+        let mut items = Vec::new();
+        for (index, path) in recents.iter().enumerate() {
+            items.push(
+                MenuItemBuilder::with_id(format!("recent-{index}"), recent_menu_label(path))
+                    .build(app)?,
+            );
+        }
+        for item in &items {
+            builder = builder.item(item);
+        }
+        builder = builder.separator().text("recent-clear", "清空最近打开");
+    }
+
+    builder.build()
+}
+
+fn apply_app_menus(app: &tauri::AppHandle) -> tauri::Result<()> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        if *app.state::<HideAppMenu>().0.lock().unwrap() {
+            return Ok(());
+        }
+    }
+
     #[cfg(target_os = "macos")]
     let app_menu = SubmenuBuilder::new(app, "MarkFly")
         .text("about", "关于 MarkFly")
@@ -214,11 +279,15 @@ fn setup_app_menus(app: &tauri::AppHandle) -> tauri::Result<()> {
         .item(&PredefinedMenuItem::quit(app, Some("退出"))?)
         .build()?;
 
+    let recent_menu = build_recent_submenu(app)?;
     let file_menu = SubmenuBuilder::new(app, "文件")
         .text("new-file", "新建文件")
         .text("open-file", "打开文件...")
+        .text("open-folder", "打开目录...")
         .text("save-file", "保存文件")
         .text("save-file-as", "另存为...")
+        .separator()
+        .item(&recent_menu)
         .separator()
         .text("exit", "退出")
         .build()?;
@@ -236,11 +305,16 @@ fn setup_app_menus(app: &tauri::AppHandle) -> tauri::Result<()> {
         .accelerator("CmdOrCtrl+B")
         .build(app)?;
 
+    let toggle_fullscreen = MenuItemBuilder::with_id("toggle-fullscreen", "全屏\tF11")
+        .build(app)?;
+
     let view_menu = SubmenuBuilder::new(app, "视图")
         .item(&toggle_sidebar)
         .separator()
         .text("toggle-preview", "切换预览模式")
         .text("toggle-theme", "切换主题")
+        .separator()
+        .item(&toggle_fullscreen)
         .build()?;
 
     let help_menu = SubmenuBuilder::new(app, "帮助")
@@ -272,12 +346,21 @@ fn setup_app_menus(app: &tauri::AppHandle) -> tauri::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn register_menu_event_handler(app: &tauri::AppHandle) {
     app.on_menu_event(|app_handle, event| {
         let event_id = event.id().0.as_str();
         match event_id {
-            "new-file" | "open-file" | "save-file" | "save-file-as" | "toggle-sidebar"
-            | "toggle-preview" | "toggle-theme" => {
-                let _ = app_handle.emit("menu", event_id);
+            "new-file" | "open-file" | "open-folder" | "save-file" | "save-file-as" | "toggle-sidebar"
+            | "toggle-preview" | "toggle-theme" | "toggle-fullscreen" | "recent-clear" => {
+                let payload = if event_id == "recent-clear" {
+                    "clear-recents"
+                } else {
+                    event_id
+                };
+                let _ = app_handle.emit("menu", payload);
             }
             "exit" | "quit" => {
                 app_handle.exit(0);
@@ -287,10 +370,29 @@ fn setup_app_menus(app: &tauri::AppHandle) -> tauri::Result<()> {
                     .opener()
                     .open_url(PROJECT_HOME_URL, None::<&str>);
             }
-            _ => {}
+            other => {
+                if let Some(index) = other
+                    .strip_prefix("recent-")
+                    .and_then(|value| value.parse::<usize>().ok())
+                {
+                    let state = app_handle.state::<RecentMenuItems>();
+                    let path = state
+                        .0
+                        .lock()
+                        .ok()
+                        .and_then(|recents| recents.get(index).cloned());
+                    if let Some(path) = path {
+                        dispatch_open_files(app_handle, vec![path]);
+                    }
+                }
+            }
         }
     });
+}
 
+fn setup_app_menus(app: &tauri::AppHandle) -> tauri::Result<()> {
+    apply_app_menus(app)?;
+    register_menu_event_handler(app);
     Ok(())
 }
 
@@ -415,6 +517,219 @@ fn reveal_in_file_manager(path: String) -> Result<(), String> {
     }
 }
 
+/// 启动时去掉已经不存在的最近打开记录，并把仍在的路径纳入 FS scope
+#[tauri::command]
+fn filter_existing_files(app: tauri::AppHandle, paths: Vec<String>) -> Vec<String> {
+    let fs_scope = app.fs_scope();
+    let mut existing = Vec::new();
+    for path in paths {
+        let buf = PathBuf::from(&path);
+        if !buf.is_file() {
+            continue;
+        }
+        let _ = fs_scope.allow_file(&buf);
+        existing.push(path);
+    }
+    existing
+}
+
+#[derive(serde::Serialize)]
+struct ListedMarkdownFile {
+    path: String,
+    name: String,
+}
+
+fn is_markdown_filename(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            let lower = ext.to_ascii_lowercase();
+            lower == "md" || lower == "markdown" || lower == "txt"
+        })
+        .unwrap_or(false)
+}
+
+fn should_skip_dir_name(name: &str) -> bool {
+    matches!(
+        name,
+        "node_modules" | ".git" | "dist" | "target" | ".vs" | "__pycache__" | "vendor"
+    )
+}
+
+fn collect_markdown_files(
+    app: &tauri::AppHandle,
+    dir: &std::path::Path,
+    depth: u32,
+    out: &mut Vec<ListedMarkdownFile>,
+) {
+    const MAX_FILES: usize = 200;
+    const MAX_DEPTH: u32 = 4;
+    if out.len() >= MAX_FILES || depth > MAX_DEPTH {
+        return;
+    }
+
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+
+    let mut files = Vec::new();
+    let mut dirs = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if path.is_dir() {
+            if should_skip_dir_name(&name) {
+                continue;
+            }
+            dirs.push(path);
+        } else if path.is_file() && is_markdown_filename(&path) {
+            files.push(path);
+        }
+    }
+    files.sort();
+    dirs.sort();
+
+    let fs_scope = app.fs_scope();
+    for path in files {
+        if out.len() >= MAX_FILES {
+            return;
+        }
+        let _ = fs_scope.allow_file(&path);
+        let Some(path_str) = path.to_str() else {
+            continue;
+        };
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("未命名.md")
+            .to_string();
+        out.push(ListedMarkdownFile {
+            path: path_str.to_string(),
+            name,
+        });
+    }
+
+    for child in dirs {
+        collect_markdown_files(app, &child, depth + 1, out);
+        if out.len() >= MAX_FILES {
+            return;
+        }
+    }
+}
+
+/// 列出用户选中目录下的 Markdown / 文本文件，供知识库「目录」页签浏览
+#[tauri::command]
+fn list_markdown_files(app: tauri::AppHandle, path: String) -> Result<Vec<ListedMarkdownFile>, String> {
+    let dir = PathBuf::from(&path);
+    if !dir.is_dir() {
+        return Err(format!("不是有效文件夹: {}", dir.display()));
+    }
+    let _ = app.fs_scope().allow_directory(&dir, true);
+    let mut files = Vec::new();
+    collect_markdown_files(&app, &dir, 0, &mut files);
+    Ok(files)
+}
+
+fn is_case_only_rename(from: &PathBuf, to: &PathBuf) -> bool {
+    let (Some(from_name), Some(to_name)) = (from.file_name(), to.file_name()) else {
+        return false;
+    };
+    from.parent() == to.parent() && from_name.eq_ignore_ascii_case(to_name) && from_name != to_name
+}
+
+/// 重命名磁盘文件，返回新路径。Windows 上仅改大小写时走临时名，避免 NTFS 判成同名冲突。
+#[tauri::command]
+fn rename_local_file(app: tauri::AppHandle, from: String, to: String) -> Result<String, String> {
+    let from_path = PathBuf::from(&from);
+    let to_path = PathBuf::from(&to);
+    if !from_path.is_file() {
+        return Err(format!("文件不存在: {}", from_path.display()));
+    }
+    if from_path == to_path {
+        return Ok(from);
+    }
+    let case_only = is_case_only_rename(&from_path, &to_path);
+    if to_path.exists() && !case_only {
+        return Err(format!("已存在同名文件: {}", to_path.display()));
+    }
+    if case_only {
+        let parent = from_path.parent().ok_or_else(|| "无法确定所在目录".to_string())?;
+        let tmp = parent.join(format!(
+            ".{}-{}.markfly-tmp",
+            from_path
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("file"),
+            std::process::id()
+        ));
+        fs::rename(&from_path, &tmp).map_err(|error| format!("重命名失败: {error}"))?;
+        if let Err(error) = fs::rename(&tmp, &to_path) {
+            let _ = fs::rename(&tmp, &from_path);
+            return Err(format!("重命名失败: {error}"));
+        }
+    } else {
+        fs::rename(&from_path, &to_path).map_err(|error| format!("重命名失败: {error}"))?;
+    }
+    let _ = app.fs_scope().allow_file(&to_path);
+    to_path
+        .to_str()
+        .map(|value| value.to_string())
+        .ok_or_else(|| "新路径无法表示".to_string())
+}
+
+/// 全屏时收起原生菜单，退出全屏后再挂回去。
+/// 等主线程真正拆掉/挂上菜单后再返回，避免 JS 紧接着 setFullscreen 时菜单还在。
+#[tauri::command]
+fn set_app_menu_visible(app: tauri::AppHandle, visible: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = (app, visible);
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        *app.state::<HideAppMenu>().0.lock().unwrap() = !visible;
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let app_clone = app.clone();
+        app.run_on_main_thread(move || {
+            let result = if visible {
+                apply_app_menus(&app_clone).map_err(|error| format!("恢复菜单失败: {error}"))
+            } else if let Some(window) = app_clone.get_webview_window("main") {
+                window
+                    .remove_menu()
+                    .map(|_| ())
+                    .map_err(|error| format!("隐藏菜单失败: {error}"))
+            } else {
+                Ok(())
+            };
+            if let Err(error) = &result {
+                eprintln!("{error}");
+            }
+            let _ = done_tx.send(result);
+        })
+        .map_err(|error| error.to_string())?;
+        done_rx.recv().map_err(|error| error.to_string())?
+    }
+}
+
+/// 同步「文件 → 最近打开」子菜单，与知识库列表保持一致
+#[tauri::command]
+fn update_recent_menu(app: tauri::AppHandle, paths: Vec<String>) -> Result<(), String> {
+    {
+        let state = app.state::<RecentMenuItems>();
+        let mut recents = state.0.lock().unwrap();
+        *recents = paths;
+    }
+    let app_clone = app.clone();
+    app.run_on_main_thread(move || {
+        if let Err(error) = apply_app_menus(&app_clone) {
+            eprintln!("更新最近打开菜单失败: {error}");
+        }
+    })
+    .map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let initial_boot = read_initial_boot_files();
@@ -424,6 +739,8 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .manage(PendingOpenFiles(Mutex::new(initial_boot)))
+        .manage(RecentMenuItems(Mutex::new(Vec::new())))
+        .manage(HideAppMenu(Mutex::new(false)))
         .manage(file_watcher::FileWatcherState::new())
         .invoke_handler(tauri::generate_handler![
             get_app_info,
@@ -432,6 +749,11 @@ pub fn run() {
             read_local_text_file,
             open_external_url,
             reveal_in_file_manager,
+            filter_existing_files,
+            list_markdown_files,
+            rename_local_file,
+            set_app_menu_visible,
+            update_recent_menu,
             file_watcher::sync_file_watches
         ]);
 

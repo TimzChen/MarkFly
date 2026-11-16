@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-list-markdown-files"
+description = "Allows listing Markdown files in a user-selected folder."
+commands.allow = ["list_markdown_files"]

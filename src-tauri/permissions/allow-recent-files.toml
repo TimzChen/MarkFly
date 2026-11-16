@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-recent-files"
+description = "Allows pruning missing recent files and updating the File menu recents submenu."
+commands.allow = ["filter_existing_files", "update_recent_menu"]

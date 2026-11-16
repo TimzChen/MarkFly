@@ -47,3 +47,20 @@ export async function tauriAsk(
   const { ask } = await import('@tauri-apps/plugin-dialog')
   return ask(message, options)
 }
+
+export async function tauriIsFullscreen(): Promise<boolean> {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window')
+  return getCurrentWindow().isFullscreen()
+}
+
+export async function tauriSetFullscreen(fullscreen: boolean): Promise<void> {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window')
+  await getCurrentWindow().setFullscreen(fullscreen)
+}
+
+export async function tauriOnWindowResized(handler: () => void): Promise<UnlistenFn> {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window')
+  return getCurrentWindow().onResized(() => {
+    handler()
+  })
+}

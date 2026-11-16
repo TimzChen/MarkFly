@@ -16,7 +16,7 @@
           <h4>外观</h4>
           <div class="setting-item">
             <label>主题</label>
-            <select v-model="themeStore.mode" @change="themeStore.setTheme(themeStore.mode)">
+            <select :value="themeStore.mode" @change="onThemeChange">
               <option value="light">浅色</option>
               <option value="dark">深色</option>
               <option value="auto">跟随系统</option>
@@ -69,7 +69,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { useThemeStore } from '../stores/theme'
+import { useThemeStore, type ThemeMode } from '../stores/theme'
 
 interface Props {
   visible: boolean
@@ -85,6 +85,13 @@ const emit = defineEmits<Emits>()
 const themeStore = useThemeStore()
 const fontSize = ref(14)
 const wordWrap = ref(true)
+
+const onThemeChange = (event: Event) => {
+  const value = (event.target as HTMLSelectElement).value
+  if (value === 'light' || value === 'dark' || value === 'auto') {
+    themeStore.setTheme(value as ThemeMode)
+  }
+}
 
 const close = () => {
   emit('close')

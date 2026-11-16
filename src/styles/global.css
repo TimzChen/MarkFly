@@ -167,27 +167,31 @@ html, body {
 
 /* 顶栏合并：工具栏 DOM 移入 .toolbar-actions 后的样式 */
 .toolbar-actions .bytemd-toolbar {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
-  width: auto;
-  max-width: 100%;
+  width: max-content;
+  max-width: none;
   border-bottom: none !important;
   background: transparent !important;
   padding: 0 8px !important;
   min-height: 35px !important;
-  height: auto !important;
-  max-height: 70px !important;
-  flex-wrap: wrap;
+  height: 35px !important;
+  max-height: 35px !important;
+  flex-wrap: nowrap;
   justify-content: flex-end;
-  align-content: center;
-  overflow: hidden;
+  align-items: center;
+  overflow: visible;
   box-sizing: border-box;
 }
 
-.toolbar-actions .bytemd-toolbar-left,
-.toolbar-actions .bytemd-toolbar-right {
-  flex-wrap: wrap;
+.toolbar-actions .bytemd-toolbar-left {
+  flex-wrap: nowrap;
   justify-content: flex-end;
+}
+
+.toolbar-actions .bytemd-toolbar-right,
+.bytemd .bytemd-toolbar-right {
+  display: none !important;
 }
 
 /* 保留ByteMD自带的工具栏，但调整样式 */

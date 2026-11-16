@@ -2,6 +2,8 @@ export interface FileItem {
   name: string
   content: string
   path: string
+  /** 相对上次打开或保存，是否有未写入磁盘的修改 */
+  dirty?: boolean
 }
 
 export const sampleFiles: FileItem[] = [

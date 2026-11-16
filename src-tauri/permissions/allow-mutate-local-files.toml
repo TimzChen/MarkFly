@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-mutate-local-files"
+description = "Allows renaming local Markdown files from the knowledge base."
+commands.allow = ["rename_local_file"]
