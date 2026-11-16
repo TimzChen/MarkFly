@@ -8,25 +8,36 @@
 
 ## 📦 最新版本发布
 
-### MarkFly v0.1.6 (2026-08-07)
+### MarkFly v0.1.7 (2026-11-16)
 
-[v0.1.6 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.6) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
+[v0.1.7 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.7) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
 
 #### 下载安装包
 
 - **Windows**
-  - [MarkFly_0.1.6_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.6/MarkFly_0.1.6_x64-setup.exe)
+  - [MarkFly_0.1.7_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.7/MarkFly_0.1.7_x64-setup.exe)
 
 > macOS / Linux 安装包可通过 [GitHub Actions 手动发版](https://github.com/TimzChen/MarkFly/actions/workflows/manual-release.yml) 构建，或参考下方「构建应用」在本地打包。
 
-#### v0.1.6 更新内容
+#### v0.1.7 更新内容
 
-- **预览本地文件链接**：点击 `d:\...` / 相对路径的 Markdown 链接，可在应用内打开对应文件
-- **外链用系统浏览器打开**：`http(s)` / `mailto` 不再在 WebView 内跳转
-- **金额美元符不再被吃掉**：关闭单 `$` 行内公式误解析，`$412` 等按普通文本显示
-- **打开失败可见提示**：链接目标不存在或无法读取时，顶部给出短暂提示
+- **知识库三栏**：已打开 / 最近打开 / 目录；打开的文件夹只在本次会话有效
+- **目录在左、知识库在右**：均可拖宽、折叠，样式对齐
+- **窗口全屏**：`F11` 进入全屏，同时收起原生菜单和知识库
+- **布局由顶栏接管**：分屏 / 仅编辑 / 仅预览，去掉 ByteMD 右侧重复按钮
+- **主题默认跟随系统**：状态栏或 `Ctrl+T` 只在浅色和深色之间切换
+- **新建不落盘**：未保存的新文件只在内存里，保存才写入磁盘
+- **Mermaid 对齐 Cursor**：流程图方向与 subgraph 顺序不再和预览里看到的反着来
 
 #### 历史版本
+
+<details>
+<summary>MarkFly v0.1.6 (2026-08-07)</summary>
+
+- **Windows**: [MarkFly_0.1.6_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.6/MarkFly_0.1.6_x64-setup.exe)
+- 预览本地链接跳转、外链系统浏览器打开、关闭单 `$` 公式误解析
+
+</details>
 
 <details>
 <summary>MarkFly v0.1.5 (2026-08-06)</summary>
@@ -135,7 +146,7 @@ MarkFly 的目标是成为一款轻量级、高性能且功能丰富的 Markdown
 
 ### 🎨 精心设计
 - 简洁直观的界面
-- 深色/浅色主题自动适配
+- 主题默认跟随系统，也可钉成浅色或深色
 - 响应式设计，适配不同屏幕尺寸
 
 ### 🌍 开源免费
@@ -147,8 +158,8 @@ MarkFly 的目标是成为一款轻量级、高性能且功能丰富的 Markdown
 
 - 🚀 **极致性能**: Boot 预览层 + 编辑器懒加载，启动与打开文件更快
 - 🖥️ **跨平台支持**: 完美支持 Windows、macOS、Linux 三大操作系统
-- 📝 **实时预览**: 分屏 / 仅预览 / 标签切换，多种布局随心选
-- 🗂️ **文件管理**: 侧边栏文件树、多标签页、打开文件夹、Shell 关联打开
+- 📝 **实时预览**: 分屏 / 仅预览 / 仅编辑，多种布局随心选
+- 🗂️ **文件管理**: 知识库（已打开 / 最近打开 / 目录）、多标签页、Shell 关联打开
 - 🔔 **外部变更检测**: 文件被其他程序修改时顶部轻提示，点击即可重新加载
 - 🎨 **VS Code 风格界面**: 标签栏、状态栏、列表选中态主题统一
 - 🎨 **语法高亮**: 支持 180+ 编程语言的代码高亮显示
@@ -157,7 +168,8 @@ MarkFly 的目标是成为一款轻量级、高性能且功能丰富的 Markdown
 - 📋 **GFM 扩展**: 完整支持 GitHub Flavored Markdown 规范
 - 🔍 **图片缩放**: 点击图片即可放大查看细节
 - 💾 **文件管理**: 支持新建、打开、保存、另存为 Markdown 文件
-- 🌙 **主题切换**: 支持浅色 / 深色 / 跟随系统三种模式
+- 🌙 **主题切换**: 默认跟随系统；点一下在浅色和深色之间切，跟随系统留在设置里
+- 🖥️ **窗口全屏**: `F11` 全屏写作，菜单和知识库自动收起
 - 🎯 **专注写作**: 简洁直观的界面设计，让你专注于内容创作
 
 ## 🔒 安全与隐私
@@ -219,7 +231,7 @@ Windows 本地发版（NSIS 安装包）：
 
 ```powershell
 .\scripts\build-release.ps1
-# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.6_x64-setup.exe
+# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.7_x64-setup.exe
 ```
 
 ## 📖 使用指南
@@ -231,9 +243,11 @@ Windows 本地发版（NSIS 安装包）：
 | `Ctrl/Cmd + N` | 新建文件 |
 | `Ctrl/Cmd + O` | 打开文件 |
 | `Ctrl/Cmd + S` | 保存文件 |
-| `Ctrl/Cmd + B` | 显示 / 隐藏侧边栏 |
+| `Ctrl/Cmd + B` | 显示 / 隐藏知识库 |
+| `Ctrl/Cmd + T` | 浅色 / 深色切换 |
+| `F11` | 窗口全屏 |
 
-预览模式切换、主题切换等可通过**视图菜单**或编辑器工具栏操作。
+预览布局、打开目录等可通过**文件 / 视图菜单**或顶栏按钮操作。
 
 ### 支持的文件格式
 
