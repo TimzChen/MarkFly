@@ -27,4 +27,5 @@ if (Test-Path $vswhere) {
 npx tauri build --bundles nsis --features custom-protocol
 
 Write-Host ""
-Write-Host "Done:" (Join-Path $projectRoot 'src-tauri\target\release\bundle\nsis\MarkFly_0.1.8_x64-setup.exe')
+$tauriConf = Get-Content (Join-Path $projectRoot 'src-tauri\tauri.conf.json') -Raw | ConvertFrom-Json
+Write-Host "Done:" (Join-Path $projectRoot "src-tauri\target\release\bundle\nsis\MarkFly_$($tauriConf.version)_x64-setup.exe")

@@ -26,8 +26,17 @@ struct PendingOpenFile {
 struct PendingOpenFiles(Mutex<Vec<PendingOpenFile>>);
 
 struct RecentMenuItems(Mutex<Vec<String>>);
-/// 全屏时收起原生菜单；为 true 时不要把菜单再画回去（例如刷新「最近打开」时）
+/// 全屏时不要把原生菜单再画回去（例如刷新「最近打开」时）
 struct HideAppMenu(Mutex<bool>);
+
+#[cfg(windows)]
+struct SavedWindowFrame {
+    placement: windows_sys::Win32::UI::WindowsAndMessaging::WINDOWPLACEMENT,
+    style: i32,
+}
+
+#[cfg(windows)]
+struct FullscreenFrame(Mutex<Option<SavedWindowFrame>>);
 
 const BOOT_PREVIEW_MAX_BYTES: usize = 512 * 1024;
 
@@ -778,9 +787,10 @@ fn rename_local_file(app: tauri::AppHandle, from: String, to: String) -> Result<
 }
 
 /// 全屏时收起原生菜单，退出全屏后再挂回去。
-/// 等主线程真正拆掉/挂上菜单后再返回，避免 JS 紧接着 setFullscreen 时菜单还在。
+/// 只允许从后台线程调用 `remove_menu`/`set_menu`：它们自己会 marshal 到 UI 线程。
+/// 若再包一层 `run_on_main_thread`，Windows 上会在 UI 线程里等自己，按一两次 F11 就卡死。
 #[tauri::command]
-fn set_app_menu_visible(app: tauri::AppHandle, visible: bool) -> Result<(), String> {
+async fn set_app_menu_visible(app: tauri::AppHandle, visible: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let _ = (app, visible);
@@ -790,26 +800,136 @@ fn set_app_menu_visible(app: tauri::AppHandle, visible: bool) -> Result<(), Stri
     #[cfg(not(target_os = "macos"))]
     {
         *app.state::<HideAppMenu>().0.lock().unwrap() = !visible;
+        if visible {
+            apply_app_menus(&app).map_err(|error| format!("恢复菜单失败: {error}"))
+        } else if let Some(window) = app.get_webview_window("main") {
+            window
+                .remove_menu()
+                .map(|_| ())
+                .map_err(|error| format!("隐藏菜单失败: {error}"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(windows)]
+fn apply_borderless_fullscreen(app: &tauri::AppHandle, fullscreen: bool) -> Result<bool, String> {
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowLongW, GetWindowPlacement, SetWindowLongW, SetWindowPlacement, SetWindowPos,
+        GWL_STYLE, HWND_TOP, SWP_ASYNCWINDOWPOS, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOOWNERZORDER,
+        SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, WINDOWPLACEMENT, WS_OVERLAPPEDWINDOW, WS_VISIBLE,
+    };
+
+    let window = app.get_webview_window("main").ok_or("没有主窗口")?;
+    let hwnd = window.hwnd().map_err(|error| error.to_string())?.0 as _;
+    let saved = app.state::<FullscreenFrame>();
+    let mut slot = saved.0.lock().map_err(|_| "全屏状态锁失败")?;
+
+    unsafe {
+        if fullscreen {
+            if slot.is_some() {
+                return Ok(true);
+            }
+            let mut placement = std::mem::zeroed::<WINDOWPLACEMENT>();
+            placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+            if GetWindowPlacement(hwnd, &mut placement) == 0 {
+                return Err("读取窗口位置失败".into());
+            }
+            let style = GetWindowLongW(hwnd, GWL_STYLE);
+            let mut info = std::mem::zeroed::<MONITORINFO>();
+            info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+            if GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut info) == 0 {
+                return Err("读取屏幕信息失败".into());
+            }
+            *slot = Some(SavedWindowFrame { placement, style });
+            drop(slot);
+            SetWindowLongW(
+                hwnd,
+                GWL_STYLE,
+                (style & !WS_OVERLAPPEDWINDOW as i32) | WS_VISIBLE as i32,
+            );
+            let rect = info.rcMonitor;
+            SetWindowPos(
+                hwnd,
+                HWND_TOP,
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+                SWP_FRAMECHANGED | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS | SWP_SHOWWINDOW,
+            );
+            Ok(true)
+        } else {
+            let Some(frame) = slot.take() else {
+                return Ok(false);
+            };
+            drop(slot);
+            SetWindowLongW(hwnd, GWL_STYLE, frame.style);
+            SetWindowPlacement(hwnd, &frame.placement);
+            SetWindowPos(
+                hwnd,
+                HWND_TOP,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE
+                    | SWP_NOSIZE
+                    | SWP_NOZORDER
+                    | SWP_FRAMECHANGED
+                    | SWP_ASYNCWINDOWPOS
+                    | SWP_SHOWWINDOW,
+            );
+            Ok(false)
+        }
+    }
+}
+
+/// Windows 不用 tao 的 `setFullscreen` / muda 拆菜单：那两条都会在 UI 线程里重入卡死。
+/// 这里只改窗口样式铺满屏幕，菜单随标题栏一起隐掉，退出时按保存的 placement 还原。
+#[tauri::command]
+async fn set_window_fullscreen(app: tauri::AppHandle, fullscreen: bool) -> Result<bool, String> {
+    *app.state::<HideAppMenu>().0.lock().unwrap() = fullscreen;
+
+    #[cfg(windows)]
+    {
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let app_clone = app.clone();
         app.run_on_main_thread(move || {
-            let result = if visible {
-                apply_app_menus(&app_clone).map_err(|error| format!("恢复菜单失败: {error}"))
-            } else if let Some(window) = app_clone.get_webview_window("main") {
-                window
-                    .remove_menu()
-                    .map(|_| ())
-                    .map_err(|error| format!("隐藏菜单失败: {error}"))
-            } else {
-                Ok(())
-            };
-            if let Err(error) = &result {
-                eprintln!("{error}");
-            }
+            let result = apply_borderless_fullscreen(&app_clone, fullscreen);
             let _ = done_tx.send(result);
         })
         .map_err(|error| error.to_string())?;
-        done_rx.recv().map_err(|error| error.to_string())?
+        let applied = tauri::async_runtime::spawn_blocking(move || {
+            done_rx.recv_timeout(std::time::Duration::from_millis(800))
+        })
+        .await
+        .map_err(|error| error.to_string())?
+        .unwrap_or(Ok(fullscreen));
+        if let Some(window) = app.get_webview_window("main") {
+            let menu_result = if fullscreen {
+                window.hide_menu()
+            } else {
+                window.show_menu()
+            };
+            if let Err(error) = menu_result {
+                eprintln!("切换菜单显示失败: {error}");
+            }
+        }
+        return applied;
+    }
+
+    #[cfg(not(windows))]
+    {
+        let window = app.get_webview_window("main").ok_or("没有主窗口")?;
+        window
+            .set_fullscreen(fullscreen)
+            .map_err(|error| error.to_string())?;
+        window.is_fullscreen().map_err(|error| error.to_string())
     }
 }
 
@@ -853,9 +973,15 @@ pub fn run() {
             list_markdown_files,
             rename_local_file,
             set_app_menu_visible,
+            set_window_fullscreen,
             update_recent_menu,
             file_watcher::sync_file_watches
         ]);
+
+    #[cfg(windows)]
+    {
+        builder = builder.manage(FullscreenFrame(Mutex::new(None)));
+    }
 
     #[cfg(windows)]
     {

@@ -36,6 +36,11 @@
             <path d="M4 7h16M9 7V5h6v2m-7 0l.7 12h7.6L17 7" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
           </svg>
         </button>
+        <button type="button" class="action-btn kb-close-btn" title="关闭知识库" @click="emit('close')">
+          <svg width="14" height="14" viewBox="0 0 48 48" fill="none">
+            <path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="4" d="m8 8 32 32M8 40 40 8"/>
+          </svg>
+        </button>
       </div>
     </div>
 
@@ -440,6 +445,7 @@ const emit = defineEmits<{
   contextOpened: []
   renameFile: [payload: { path: string; newName: string }]
   renameStarted: []
+  close: []
 }>()
 
 const menu = ref<KbMenu | null>(null)
@@ -660,6 +666,7 @@ onUnmounted(() => {
 
 <style scoped>
 .file-tree {
+  position: relative;
   background: var(--bg-primary);
   color: var(--text-primary);
   display: flex;
@@ -682,17 +689,32 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
+.kb-close-btn {
+  position: relative;
+  margin-left: 4px;
+}
+
+.kb-close-btn::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 7px;
+  width: 1px;
+  height: 14px;
+  background: var(--border-color);
+}
+
 .kb-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 20px 8px 8px 16px;
+  padding: 16px 8px 8px 16px;
   flex-shrink: 0;
 }
 
 .kb-title {
-  margin: 4px 0 0;
+  margin: 0;
   font-size: 16px;
   font-weight: 600;
   line-height: 1.3;

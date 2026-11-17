@@ -23,6 +23,7 @@
     "allow-reveal-in-file-manager",
     "allow-recent-files",
     "allow-set-app-menu-visible",
+    "allow-set-window-fullscreen",
     "allow-list-markdown-files",
     "allow-mutate-local-files",
     "opener:default"

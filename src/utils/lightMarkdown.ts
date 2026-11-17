@@ -1,4 +1,5 @@
 import { createHeadingSlugger, headingPlainText } from './headingSlug'
+import { normalizeImportedMarkdown } from './markdownEscapes'
 
 const escapeHtml = (text: string): string =>
   text
@@ -24,7 +25,7 @@ const renderInline = (text: string): string =>
 
 /** 零依赖轻量 Markdown 渲染，与 boot 预览层逻辑一致 */
 export const lightMarkdownToHtml = (markdown: string): string => {
-  const lines = markdown.replace(/\r\n/g, '\n').split('\n')
+  const lines = normalizeImportedMarkdown(markdown).replace(/\r\n/g, '\n').split('\n')
   const html: string[] = []
   const slugger = createHeadingSlugger()
   let inCode = false

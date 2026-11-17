@@ -8,26 +8,35 @@
 
 ## 📦 最新版本发布
 
-### MarkFly v0.1.8 (2026-11-17)
+### MarkFly v0.1.9 (2026-11-17)
 
-[v0.1.8 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.8) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
+[v0.1.9 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.9) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
 
 #### 下载安装包
 
 - **Windows**
-  - [MarkFly_0.1.8_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.8/MarkFly_0.1.8_x64-setup.exe)
+  - [MarkFly_0.1.9_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.9/MarkFly_0.1.9_x64-setup.exe)
 
 > macOS / Linux 安装包可通过 [GitHub Actions 手动发版](https://github.com/TimzChen/MarkFly/actions/workflows/manual-release.yml) 构建，或参考下方「构建应用」在本地打包。
 
-#### v0.1.8 更新内容
+#### v0.1.9 更新内容
 
-- **目录含子文件夹**：知识库「目录」会列出嵌套的 Markdown / 文本，树可折叠，并支持刷新（按钮 / 右键 / `F5`）
-- **正文按标题折叠**：预览里可以收起某一节；侧栏目录也可以折叠
-- **切标签记住位置**：回到文档时恢复原来的滚动和光标，打开 `文件.md#标题` 仍会跳到对应章节
-- **Mermaid 改用 ELK**：流程图嵌套布局更接近 Cursor
-- **刷新有反馈**：点刷新图标会转动，列表没变化也能看出点中了
+- **记住未关文件**：闪退或重开后恢复上次还开着的磁盘文件；知识库目录也会记住
+- **最近打开不跳栏**：在「最近打开」点文件只会打开标签，不再切到「已打开」
+- **宽表可横滑**：预览里列很多的表格自己出滚动条，正文不会被撑歪
+- **格式工具栏可收起**：默认收起，分屏 / 仅编辑时用小箭头展开
+- **全屏不再卡死**：Windows 改为无边框全屏，F11 会收起目录和知识库
+- **飞书导出更好读**：目录和预览解开多余的 `\-`、`\.`，标题里的 `**` 不再当原文显示
 
 #### 历史版本
+
+<details>
+<summary>MarkFly v0.1.8 (2026-11-17)</summary>
+
+- **Windows**: [MarkFly_0.1.8_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.8/MarkFly_0.1.8_x64-setup.exe)
+- 目录含子文件夹、正文按标题折叠、切标签记住滚动位置、Mermaid 改用 ELK
+
+</details>
 
 <details>
 <summary>MarkFly v0.1.7 (2026-11-16)</summary>
@@ -237,7 +246,7 @@ Windows 本地发版（NSIS 安装包）：
 
 ```powershell
 .\scripts\build-release.ps1
-# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.8_x64-setup.exe
+# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.9_x64-setup.exe
 ```
 
 ## 📖 使用指南

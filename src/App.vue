@@ -1,5 +1,5 @@
 <template>
-  <div class="markfly-app">
+  <div class="markfly-app" :class="{ 'is-window-fullscreen': isWindowFullscreen }">
     <!-- 主编辑区域 -->
     <div class="app-body" ref="appBodyRef" :class="{ 'is-resizing-panels': !!resizingPanel }">
       <TableOfContents
@@ -54,50 +54,44 @@
         <div
           v-if="files.length > 0"
           class="editor-unified-header"
-          :class="{ 'is-merged': showUnifiedHeader }"
+          :class="{ 'has-format-row': showFormatToolbar }"
         >
-          <div class="file-tabs">
-            <div 
-              v-for="file in files" 
-              :key="file.path"
-              class="file-tab"
-              :class="{ active: file.path === currentFilePath }"
-              :title="file.name"
-              @click="selectFile(file)"
-              @contextmenu.prevent="openTabContextMenu($event, file)"
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" class="tab-file-icon">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" fill="none"/>
-                <polyline points="14,2 14,8 20,8" stroke="currentColor" stroke-width="2"/>
-              </svg>
-              <span class="tab-name">{{ file.name }}</span>
-              <span
-                v-if="file.dirty"
-                class="tab-dirty-dot"
-                title="未保存"
-              />
-              <span
-                v-if="externalChangePaths.includes(file.path)"
-                class="tab-reload-dot"
-                title="文件已在磁盘上被修改"
-              />
-              <button class="tab-close" @click.stop="closeFile(file)" title="关闭文件">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
-                  <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2"/>
-                  <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2"/>
+          <div class="header-chrome">
+            <div class="file-tabs">
+              <div
+                v-for="file in files"
+                :key="file.path"
+                class="file-tab"
+                :class="{ active: file.path === currentFilePath }"
+                :title="file.name"
+                @click="selectFile(file)"
+                @contextmenu.prevent="openTabContextMenu($event, file)"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" class="tab-file-icon">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" fill="none"/>
+                  <polyline points="14,2 14,8 20,8" stroke="currentColor" stroke-width="2"/>
                 </svg>
-              </button>
+                <span class="tab-name">{{ file.name }}</span>
+                <span
+                  v-if="file.dirty"
+                  class="tab-dirty-dot"
+                  title="未保存"
+                />
+                <span
+                  v-if="externalChangePaths.includes(file.path)"
+                  class="tab-reload-dot"
+                  title="文件已在磁盘上被修改"
+                />
+                <button class="tab-close" @click.stop="closeFile(file)" title="关闭文件">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none">
+                    <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2"/>
+                    <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2"/>
+                  </svg>
+                </button>
+              </div>
             </div>
-          </div>
 
-          <div
-            v-if="showUnifiedHeader"
-            ref="toolbarHostRef"
-            class="toolbar-host"
-            :class="{ collapsed: toolbarCollapsed }"
-          >
-            <div ref="toolbarActionsRef" class="toolbar-actions"></div>
-            <div v-if="!toolbarCollapsed" class="preview-layout-toolbar">
+            <div v-if="showUnifiedHeader" class="preview-layout-toolbar">
               <button
                 v-if="showTocRail"
                 type="button"
@@ -155,16 +149,36 @@
               </button>
             </div>
             <button
+              v-if="showUnifiedHeader && !usePreviewViewer && toolbarCollapsed"
               class="toolbar-toggle-btn"
+              type="button"
+              aria-expanded="false"
               @click.stop="toggleToolbar"
-              :title="toolbarCollapsed ? '显示工具栏' : '隐藏工具栏'"
+              title="显示格式工具栏"
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                <polyline
-                  :points="toolbarCollapsed ? '15,6 9,12 15,18' : '9,6 15,12 9,18'"
-                  stroke="currentColor"
-                  stroke-width="2"
-                />
+                <polyline points="6,9 12,15 18,9" stroke="currentColor" stroke-width="2"/>
+              </svg>
+            </button>
+          </div>
+
+          <div
+            v-if="showUnifiedHeader"
+            ref="toolbarHostRef"
+            class="toolbar-host"
+            :class="{ collapsed: toolbarCollapsed || usePreviewViewer }"
+          >
+            <div ref="toolbarActionsRef" class="toolbar-actions"></div>
+            <button
+              v-if="!usePreviewViewer"
+              class="toolbar-toggle-btn is-on-format-row"
+              type="button"
+              aria-expanded="true"
+              @click.stop="toggleToolbar"
+              title="隐藏格式工具栏"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <polyline points="6,15 12,9 18,15" stroke="currentColor" stroke-width="2"/>
               </svg>
             </button>
           </div>
@@ -351,12 +365,13 @@
         @clearRecents="clearRecentItems"
         @closeFolder="closeKbFolder"
         @refreshFolder="() => refreshFolderFiles({ feedback: true })"
-        @changePane="kbPane = $event"
+        @changePane="onChangeKbPane"
         @revealPath="revealPathInExplorer"
         @refreshFile="refreshFileFromDisk"
         @contextOpened="closeTabContextMenu(true)"
         @renameFile="renameOpenFile"
         @renameStarted="startRenamePath = ''"
+        @close="hideSidebar"
       />
     </div>
 
@@ -470,6 +485,7 @@ import { needsFullPreview, stripFrontmatter } from './utils/markdownPreview'
 import { consumeMediumPreviewPreload, createCorePreviewPlugins, startMediumPreviewPreload } from './utils/previewEngine'
 import {
   applyHeadingFold,
+  wrapPreviewTables,
   bindPreviewFoldDoc,
   forgetPreviewFoldDoc,
   migratePreviewFoldDoc,
@@ -486,6 +502,7 @@ import {
   scrollPreviewToAnchor,
   unbindPreviewLinkNavigation,
 } from './utils/previewLinkNavigation'
+import { hasRealInlineMath, normalizeImportedMarkdown } from './utils/markdownEscapes'
 import { previewSanitize } from './utils/previewLinkConfig'
 import { toolbarIcons } from './utils/toolbarIcons'
 import {
@@ -512,9 +529,6 @@ import {
   tauriOpenFile,
   tauriSaveFile,
   tauriAsk,
-  tauriIsFullscreen,
-  tauriSetFullscreen,
-  tauriOnWindowResized,
   tauriOnWindowFocusChanged,
 } from './utils/tauriBridge'
 
@@ -568,11 +582,13 @@ const ensureEditorComponent = async () => {
 const themeStore = useThemeStore()
 
 const SIDEBAR_STORAGE_KEY = 'markfly-sidebar-collapsed'
+const KB_FOLDER_STORAGE_KEY = 'markfly-kb-folder'
+const KB_PANE_STORAGE_KEY = 'markfly-kb-pane'
 const RAIL_BTN_OFFSET_KEY = 'markfly-rail-btn-offset'
 const TOOLBAR_STORAGE_KEY = 'markfly-toolbar-collapsed'
 const PREVIEW_TOC_STORAGE_KEY = 'markfly-preview-toc-visible'
 const EDITOR_MODE_STORAGE_KEY = 'markfly-editor-mode'
-/** WebView 刷新后用于恢复已打开的磁盘文件列表 */
+/** 已打开的磁盘文件；localStorage 才能在闪退 / 重开后恢复 */
 const OPEN_SESSION_KEY = 'markfly-open-session'
 const TOC_WIDTH_KEY = 'markfly-toc-width'
 const FILE_TREE_WIDTH_KEY = 'markfly-filetree-width'
@@ -643,7 +659,7 @@ let railBtnDragStartY = 0
 let railBtnDragStartTop = 0
 let railBtnDidDrag = false
 let railBodyObserver: ResizeObserver | null = null
-const toolbarCollapsed = ref(localStorage.getItem(TOOLBAR_STORAGE_KEY) === 'true')
+const toolbarCollapsed = ref(localStorage.getItem(TOOLBAR_STORAGE_KEY) !== 'false')
 const previewTocVisible = ref(localStorage.getItem(PREVIEW_TOC_STORAGE_KEY) === 'true')
 const files = ref<FileItem[]>([])
 const recentFiles = ref<RecentFile[]>(readRecentFiles())
@@ -676,7 +692,6 @@ const dismissedExternalBannerPaths = ref<string[]>([])
 const lastExternalContents = new Map<string, string>()
 const watchSuppressUntil = new Map<string, number>()
 let unlistenFileChanged: (() => void) | null = null
-let unlistenWindowResized: (() => void) | null = null
 let unlistenWindowFocusChanged: (() => void) | null = null
 const tabContextMenu = ref<TabContextMenuState | null>(null)
 /** 防止右键抬起触发的 click 立刻关掉刚打开的菜单 */
@@ -713,6 +728,9 @@ const currentFilePath = computed(() => currentFile.value?.path ?? '')
 bindPreviewFoldDoc(() => currentFilePath.value)
 const showUnifiedHeader = computed(() => files.value.length > 0 && !!currentFile.value)
 const usePreviewViewer = computed(() => editorLayout.value === 'preview-only')
+const showFormatToolbar = computed(
+  () => showUnifiedHeader.value && !toolbarCollapsed.value && !usePreviewViewer.value
+)
 /** 当前文件有外部变更且未主动关闭横幅时显示 */
 const showExternalChangeBanner = computed(() => {
   const path = currentFile.value?.path
@@ -840,9 +858,9 @@ const needsMediumPlugins = (content: string) => needsFullPreview(content)
 const needsHeavyPlugins = (content: string) => {
   if (!content) return false
   if (/```\s*mermaid\b/.test(content)) return true
-  // 仅识别块级 $$ 与标准行内 \\( \\)；单 $ 是普通字符（金额等），不触发数学插件
+  // 仅识别块级 $$ 与真正的行内公式；飞书文案 \(Coda\) 不算
   if (/\$\$[\s\S]+?\$\$/.test(content)) return true
-  if (/\\\([\s\S]+?\\\)/.test(content)) return true
+  if (hasRealInlineMath(content)) return true
   return false
 }
 
@@ -936,7 +954,9 @@ const scheduleHeavyPluginLoad = (content = markdown.value) => {
   }
 }
 
-const previewSource = computed(() => stripFrontmatter(markdown.value))
+const previewSource = computed(() =>
+  normalizeImportedMarkdown(stripFrontmatter(markdown.value))
+)
 
 const normalizePreviewHtml = (html: string): string =>
   html.replace(/>\s*\n{2,}\s*</g, '><')
@@ -975,6 +995,7 @@ const applyPreviewViewerEffects = () => {
     if (body) {
       bindPreviewImageZoom(body)
       applyHeadingFold(body)
+      wrapPreviewTables(body)
     }
     ensurePreviewLinkBindings()
     consumePendingPreviewHash()
@@ -1366,9 +1387,62 @@ const onTauriFocusChanged = (focused: boolean) => {
 }
 
 const openFolderFile = async (filePath: string) => {
-  const stayOnFolder = kbPane.value === 'folder'
   await openFileFromPath(filePath)
-  if (stayOnFolder && kbFolderPath.value) kbPane.value = 'folder'
+}
+
+const persistKbFolder = (path: string) => {
+  try {
+    if (path) localStorage.setItem(KB_FOLDER_STORAGE_KEY, path)
+    else localStorage.removeItem(KB_FOLDER_STORAGE_KEY)
+  } catch {
+    // 无本地存储时忽略
+  }
+}
+
+const persistKbPane = (pane: KnowledgePane) => {
+  try {
+    localStorage.setItem(KB_PANE_STORAGE_KEY, pane)
+  } catch {
+    // 无本地存储时忽略
+  }
+}
+
+const readSavedKbFolder = () => {
+  try {
+    return localStorage.getItem(KB_FOLDER_STORAGE_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+const readSavedKbPane = (): KnowledgePane | '' => {
+  try {
+    const raw = localStorage.getItem(KB_PANE_STORAGE_KEY)
+    if (raw === 'opened' || raw === 'recents' || raw === 'folder') return raw
+  } catch {
+    // 无本地存储时忽略
+  }
+  return ''
+}
+
+const restoreKbFolder = async () => {
+  const saved = readSavedKbFolder()
+  if (!saved) return false
+  try {
+    await loadFolderFiles(saved)
+    kbFolderPath.value = saved
+    return true
+  } catch (error) {
+    console.error('恢复上次打开的目录失败:', error)
+    persistKbFolder('')
+    kbFolderPath.value = ''
+    folderFiles.value = []
+    return false
+  }
+}
+
+const onChangeKbPane = (pane: KnowledgePane) => {
+  kbPane.value = pane
 }
 
 const openFolder = async () => {
@@ -1381,8 +1455,10 @@ const openFolder = async () => {
     const dir = String(selected)
     await loadFolderFiles(dir)
     kbFolderPath.value = dir
+    persistKbFolder(dir)
     kbPane.value = 'folder'
     sidebarCollapsed.value = false
+    persistSidebarCollapsed()
     if (folderFiles.value.length === 0) {
       showTransientNotice('这个文件夹里没有 Markdown 文件')
     }
@@ -1397,6 +1473,7 @@ const closeKbFolder = () => {
   folderRefreshing.value = false
   kbFolderPath.value = ''
   folderFiles.value = []
+  persistKbFolder('')
   kbPane.value = files.value.length > 0 ? 'opened' : 'recents'
 }
 
@@ -1404,11 +1481,21 @@ const openSettings = () => {
   showSettings.value = true
 }
 
-const toggleSidebar = () => {
-  sidebarCollapsed.value = !sidebarCollapsed.value
+const persistSidebarCollapsed = () => {
   if (!isWindowFullscreen.value) {
     localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed.value))
   }
+}
+
+const toggleSidebar = () => {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  persistSidebarCollapsed()
+}
+
+const hideSidebar = () => {
+  if (sidebarCollapsed.value) return
+  sidebarCollapsed.value = true
+  persistSidebarCollapsed()
 }
 
 const persistPreviewToc = (visible: boolean) => {
@@ -1534,72 +1621,76 @@ const setEditorLayout = (layout: EditorLayoutMode) => {
   localStorage.setItem(EDITOR_MODE_STORAGE_KEY, layout)
 }
 
-/** 进入全屏前知识库是否收起，退出时按这个还原 */
+/** 进入全屏前知识库 / 目录是否收起，退出时按这个还原 */
 let sidebarCollapsedBeforeFullscreen = true
+let tocVisibleBeforeFullscreen = false
 let fullscreenChromeApplied = false
 let fullscreenBusy = false
-let fullscreenResizeTimer = 0
+let fullscreenFlushTimer = 0
+let lastFullscreenNativeAt = 0
+let desiredFullscreen = false
+let appliedFullscreen = false
+const FULLSCREEN_COOLDOWN_MS = 360
 
-const applyFullscreenChrome = async (entering: boolean) => {
+const applyFullscreenPanels = (entering: boolean) => {
   if (entering === fullscreenChromeApplied) return
   if (entering) {
     sidebarCollapsedBeforeFullscreen = sidebarCollapsed.value
+    tocVisibleBeforeFullscreen = previewTocVisible.value
     sidebarCollapsed.value = true
-  } else if (sidebarCollapsed.value) {
-    // 仍收着就还原进入前的状态；全屏期间用户展开过则保持展开
-    sidebarCollapsed.value = sidebarCollapsedBeforeFullscreen
+    previewTocVisible.value = false
+  } else {
+    if (sidebarCollapsed.value) {
+      sidebarCollapsed.value = sidebarCollapsedBeforeFullscreen
+    }
+    if (!previewTocVisible.value) {
+      previewTocVisible.value = tocVisibleBeforeFullscreen
+    }
+    persistSidebarCollapsed()
+    try {
+      localStorage.setItem(PREVIEW_TOC_STORAGE_KEY, String(previewTocVisible.value))
+    } catch {
+      // 无本地存储时忽略
+    }
   }
   fullscreenChromeApplied = entering
-  try {
-    await tauriInvoke('set_app_menu_visible', { visible: !entering })
-  } catch {
-    // 浏览器预览没有该命令
-  }
-  if (!entering) {
-    localStorage.setItem(SIDEBAR_STORAGE_KEY, String(sidebarCollapsed.value))
-  }
 }
 
-const reconcileWindowFullscreen = async () => {
-  try {
-    const fullscreen = await tauriIsFullscreen()
-    isWindowFullscreen.value = fullscreen
-    await applyFullscreenChrome(fullscreen)
-  } catch {
-    // 浏览器预览没有窗口 API
+const scheduleFullscreenNative = () => {
+  if (fullscreenFlushTimer) return
+  const wait = Math.max(32, lastFullscreenNativeAt + FULLSCREEN_COOLDOWN_MS - Date.now())
+  fullscreenFlushTimer = window.setTimeout(() => {
+    fullscreenFlushTimer = 0
+    void flushFullscreenNative()
+  }, wait)
+}
+
+const flushFullscreenNative = async () => {
+  if (fullscreenBusy) {
+    scheduleFullscreenNative()
+    return
   }
-}
-
-const onWindowResizedMaybeFullscreen = () => {
-  if (fullscreenBusy) return
-  if (!isWindowFullscreen.value && !fullscreenChromeApplied) return
-  window.clearTimeout(fullscreenResizeTimer)
-  fullscreenResizeTimer = window.setTimeout(() => {
-    if (fullscreenBusy) return
-    void reconcileWindowFullscreen()
-  }, 80)
-}
-
-const toggleWindowFullscreen = async () => {
-  if (fullscreenBusy) return
+  if (desiredFullscreen === appliedFullscreen) return
   fullscreenBusy = true
+  const target = desiredFullscreen
   try {
-    const entering = !(await tauriIsFullscreen())
-    if (entering) await applyFullscreenChrome(true)
-    try {
-      await tauriSetFullscreen(entering)
-      isWindowFullscreen.value = entering
-    } catch (error) {
-      isWindowFullscreen.value = !entering
-      if (entering) await applyFullscreenChrome(false)
-      throw error
-    }
-    if (!entering) await applyFullscreenChrome(false)
+    await tauriInvoke('set_window_fullscreen', { fullscreen: target })
+    appliedFullscreen = target
+    lastFullscreenNativeAt = Date.now()
+    isWindowFullscreen.value = target
   } catch (error) {
     console.error('切换全屏失败:', error)
   } finally {
     fullscreenBusy = false
+    if (desiredFullscreen !== appliedFullscreen) scheduleFullscreenNative()
   }
+}
+
+const toggleWindowFullscreen = () => {
+  desiredFullscreen = !desiredFullscreen
+  isWindowFullscreen.value = desiredFullscreen
+  applyFullscreenPanels(desiredFullscreen)
+  scheduleFullscreenNative()
 }
 
 const getThemeTooltip = () =>
@@ -1628,6 +1719,24 @@ const rememberDiskPath = (filePath: string) => {
 const revealKnowledgeRecents = () => {
   kbPane.value = 'recents'
   sidebarCollapsed.value = false
+}
+
+const applyStartupKbPane = (savedPane: KnowledgePane | '', folderReady: boolean) => {
+  if (savedPane === 'folder' && folderReady) {
+    kbPane.value = 'folder'
+  } else if (savedPane === 'recents' && recentFiles.value.length > 0) {
+    kbPane.value = 'recents'
+    sidebarCollapsed.value = false
+  } else if (files.value.length > 0) {
+    kbPane.value = 'opened'
+  } else if (folderReady) {
+    kbPane.value = 'folder'
+  } else if (recentFiles.value.length > 0) {
+    revealKnowledgeRecents()
+  } else {
+    kbPane.value = 'opened'
+  }
+  persistKbPane(kbPane.value)
 }
 
 const removeRecentItem = (filePath: string) => {
@@ -1667,6 +1776,8 @@ const isWatchSuppressed = (filePath: string) => {
 }
 
 const persistOpenSession = () => {
+  // 启动恢复还没写完时不要落盘，否则空列表 / 半截列表会把闪退前的会话盖掉
+  if (isBootstrapping.value) return
   const paths = files.value.map((file) => file.path).filter(isDiskFilePath)
   const currentPath =
     currentFile.value && isDiskFilePath(currentFile.value.path)
@@ -1674,22 +1785,29 @@ const persistOpenSession = () => {
       : ''
   try {
     const session: OpenSession = { paths, currentPath }
-    sessionStorage.setItem(OPEN_SESSION_KEY, JSON.stringify(session))
+    localStorage.setItem(OPEN_SESSION_KEY, JSON.stringify(session))
+    sessionStorage.removeItem(OPEN_SESSION_KEY)
   } catch {
     // 忽略私密模式 / 配额错误
   }
 }
 
 const readOpenSession = (): OpenSession | null => {
-  try {
-    const raw = sessionStorage.getItem(OPEN_SESSION_KEY)
+  const parse = (raw: string | null): OpenSession | null => {
     if (!raw) return null
-    const parsed = JSON.parse(raw) as OpenSession
-    if (!Array.isArray(parsed.paths)) return null
-    return {
-      paths: parsed.paths.filter((path) => typeof path === 'string' && isDiskFilePath(path)),
-      currentPath: typeof parsed.currentPath === 'string' ? parsed.currentPath : ''
+    try {
+      const parsed = JSON.parse(raw) as OpenSession
+      if (!Array.isArray(parsed.paths)) return null
+      return {
+        paths: parsed.paths.filter((path) => typeof path === 'string' && isDiskFilePath(path)),
+        currentPath: typeof parsed.currentPath === 'string' ? parsed.currentPath : '',
+      }
+    } catch {
+      return null
     }
+  }
+  try {
+    return parse(localStorage.getItem(OPEN_SESSION_KEY)) ?? parse(sessionStorage.getItem(OPEN_SESSION_KEY))
   } catch {
     return null
   }
@@ -1806,11 +1924,14 @@ const refreshFileFromDisk = async (file: FileItem) => {
  * 用于启动恢复与 WebView Refresh。
  */
 const openDiskPathsFresh = async (paths: string[], preferredCurrent = '') => {
-  const uniquePaths = [...new Set(paths.filter(isDiskFilePath))]
+  const uniquePaths: string[] = []
+  for (const path of paths.filter(isDiskFilePath)) {
+    if (!uniquePaths.some((kept) => sameFilePath(kept, path))) uniquePaths.push(path)
+  }
   if (uniquePaths.length === 0) return false
 
   for (const path of uniquePaths) {
-    const existing = files.value.find((file) => file.path === path)
+    const existing = files.value.find((file) => sameFilePath(file.path, path))
     if (existing) {
       try {
         await reloadFileFromDisk(existing)
@@ -1832,20 +1953,14 @@ const openDiskPathsFresh = async (paths: string[], preferredCurrent = '') => {
     }
   }
 
-  const targetPath =
-    (preferredCurrent && files.value.some((file) => file.path === preferredCurrent)
-      ? preferredCurrent
-      : '') ||
-    uniquePaths.find((path) => files.value.some((file) => file.path === path)) ||
-    ''
+  const targetFile =
+    files.value.find((file) => preferredCurrent && sameFilePath(file.path, preferredCurrent)) ||
+    files.value.find((file) => uniquePaths.some((path) => sameFilePath(file.path, path)))
 
-  if (targetPath) {
-    const file = files.value.find((item) => item.path === targetPath)
-    if (file) await selectFile(file)
-  }
+  if (targetFile) await selectFile(targetFile)
 
   uniquePaths.forEach((path) => {
-    if (files.value.some((file) => file.path === path)) {
+    if (files.value.some((file) => sameFilePath(file.path, path))) {
       rememberDiskPath(path)
     }
   })
@@ -1955,13 +2070,10 @@ const showTransientNotice = (message: string, durationMs = 4000) => {
 
 const openFileFromPath = async (filePath: string, preloadedContent?: string): Promise<boolean> => {
   try {
-    const existing = files.value.find(
-      (file) => file.path === filePath || file.path.toLowerCase() === filePath.toLowerCase()
-    )
+    const existing = files.value.find((file) => sameFilePath(file.path, filePath))
     if (existing) {
       await selectFile(existing)
       rememberDiskPath(filePath)
-      kbPane.value = 'opened'
       return true
     }
 
@@ -1981,7 +2093,6 @@ const openFileFromPath = async (filePath: string, preloadedContent?: string): Pr
     files.value.push(newFile)
     await selectFile(newFile)
     rememberDiskPath(filePath)
-    kbPane.value = 'opened'
     return true
   } catch (error) {
     console.error('打开文件失败:', filePath, error)
@@ -2197,7 +2308,7 @@ const openFilePaths = async (items: PendingOpenFile[] | string[]) => {
       continue
     }
 
-    const existing = files.value.find((file) => file.path === item.path)
+    const existing = files.value.find((file) => sameFilePath(file.path, item.path))
     if (existing) {
       rememberDiskPath(item.path)
       if (index === 0) selectFile(existing)
@@ -2235,7 +2346,11 @@ const openLocalFile = async () => {
     })
     
     if (selected) {
-      await openFileFromPath(selected as string)
+      const opened = await openFileFromPath(selected as string)
+      if (opened) {
+        kbPane.value = 'opened'
+        sidebarCollapsed.value = false
+      }
     }
   } catch (error) {
     console.error('打开文件失败:', error)
@@ -2331,7 +2446,7 @@ const handleKeyDown = (event: KeyboardEvent) => {
     if (shouldLeaveEscapeToOverlay()) return
     if (isWindowFullscreen.value) {
       event.preventDefault()
-      void toggleWindowFullscreen()
+      if (!event.repeat) toggleWindowFullscreen()
     }
     return
   }
@@ -2339,7 +2454,8 @@ const handleKeyDown = (event: KeyboardEvent) => {
   if (event.key === 'F11') {
     event.preventDefault()
     event.stopPropagation()
-    void toggleWindowFullscreen()
+    event.stopImmediatePropagation()
+    if (!event.repeat) toggleWindowFullscreen()
     return
   }
 
@@ -2423,6 +2539,7 @@ onMounted(async () => {
   window.addEventListener('click', onWindowClickCloseTabMenu)
   window.addEventListener('blur', onWindowClickCloseTabMenu)
   window.addEventListener('beforeunload', persistOpenSession)
+  window.addEventListener('pagehide', persistOpenSession)
   window.addEventListener('markfly-mermaid-done', onMermaidLayoutSettled)
   window.addEventListener('focus', onWindowFocusRefreshFolder)
   editorContentRef.value?.addEventListener('wheel', onRestoreUserIntent, { capture: true, passive: true })
@@ -2432,53 +2549,44 @@ onMounted(async () => {
   // 尽早关闭 boot 层，避免 PageLoad Finished 再次注入 boot 盖住 Vue UI
   await hideBootLayer()
 
+  let savedKbPane: KnowledgePane | '' = ''
+  let folderReadyPromise: Promise<boolean> | null = null
   try {
     await pruneRecentFiles()
-    try {
-      localStorage.removeItem('markfly-kb-folder')
-    } catch {
-      // 清掉旧版目录记忆即可
-    }
+    savedKbPane = readSavedKbPane()
+    folderReadyPromise = restoreKbFolder()
     const pendingFiles = await pendingBootstrapPromise
     const session = readOpenSession()
     // boot / pending 里的 content 可能是启动时的旧缓存；刷新后一律按路径重读磁盘
     const pendingPaths = pendingFiles.map((file) => file.path).filter(isDiskFilePath)
     const sessionPaths = session?.paths ?? []
     const pathsToRestore = [...new Set([...pendingPaths, ...sessionPaths])]
+    const sessionCurrent = session?.currentPath || ''
     const preferredCurrent =
-      (session?.currentPath && pathsToRestore.includes(session.currentPath)
-        ? session.currentPath
+      (sessionCurrent && pathsToRestore.some((path) => sameFilePath(path, sessionCurrent))
+        ? sessionCurrent
         : '') ||
       pendingPaths[0] ||
       sessionPaths[0] ||
       ''
 
+    const folderReady = await folderReadyPromise
     if (pathsToRestore.length > 0) {
       const restored = await openDiskPathsFresh(pathsToRestore, preferredCurrent)
-      if (restored || files.value.length > 0) {
-        kbPane.value = 'opened'
-      } else if (recentFiles.value.length > 0) {
-        revealKnowledgeRecents()
-      } else {
+      if (!restored && files.value.length === 0 && recentFiles.value.length === 0 && !folderReady) {
         await loadWelcomeSample()
-        kbPane.value = 'opened'
       }
-    } else if (files.value.length === 0) {
-      if (recentFiles.value.length > 0) {
-        revealKnowledgeRecents()
-      } else {
-        await loadWelcomeSample()
-        kbPane.value = 'opened'
-      }
+    } else if (files.value.length === 0 && recentFiles.value.length === 0 && !folderReady) {
+      await loadWelcomeSample()
     }
+    applyStartupKbPane(savedKbPane, folderReady)
   } catch (error) {
     console.error('启动时打开文件失败:', error)
-    if (files.value.length === 0 && recentFiles.value.length === 0) {
+    const folderReady = folderReadyPromise ? await folderReadyPromise : false
+    if (files.value.length === 0 && recentFiles.value.length === 0 && !folderReady) {
       await loadWelcomeSample()
-      kbPane.value = 'opened'
-    } else if (files.value.length === 0) {
-      revealKnowledgeRecents()
     }
+    applyStartupKbPane(savedKbPane, folderReady)
   } finally {
     isBootstrapping.value = false
     persistOpenSession()
@@ -2533,7 +2641,7 @@ const setupDeferredAppServices = async () => {
         themeStore.toggleTheme()
         break
       case 'toggle-fullscreen':
-        void toggleWindowFullscreen()
+        toggleWindowFullscreen()
         break
       case 'clear-recents':
         clearRecentItems()
@@ -2548,12 +2656,6 @@ const setupDeferredAppServices = async () => {
   })
 
   await syncDiskFileWatches()
-  void reconcileWindowFullscreen()
-  try {
-    unlistenWindowResized = await tauriOnWindowResized(onWindowResizedMaybeFullscreen)
-  } catch {
-    // 浏览器预览没有窗口 API
-  }
   try {
     unlistenWindowFocusChanged = await tauriOnWindowFocusChanged(onTauriFocusChanged)
   } catch {
@@ -2612,6 +2714,7 @@ watch(currentFilePath, () => {
 })
 
 watch(kbPane, (pane) => {
+  if (!isBootstrapping.value) persistKbPane(pane)
   if (pane === 'folder') void refreshFolderFiles()
 })
 
@@ -2640,7 +2743,9 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown, true)
   window.removeEventListener('click', onWindowClickCloseTabMenu)
   window.removeEventListener('blur', onWindowClickCloseTabMenu)
+  persistOpenSession()
   window.removeEventListener('beforeunload', persistOpenSession)
+  window.removeEventListener('pagehide', persistOpenSession)
   window.removeEventListener('resize', clampSidebarBtnPosition)
   window.removeEventListener('markfly-mermaid-done', onMermaidLayoutSettled)
   window.removeEventListener('focus', onWindowFocusRefreshFolder)
@@ -2651,10 +2756,9 @@ onUnmounted(() => {
   clearRestoreViewTimers()
   railBodyObserver?.disconnect()
   railBodyObserver = null
-  window.clearTimeout(fullscreenResizeTimer)
+  window.clearTimeout(fullscreenFlushTimer)
   clearToolbarMountTimers()
   unlistenFileChanged?.()
-  unlistenWindowResized?.()
   unlistenWindowFocusChanged?.()
   toolbarObserver?.disconnect()
   unbindPreviewImageZoom(previewBodyRef.value)
@@ -3078,20 +3182,30 @@ onUnmounted(() => {
   background: var(--bg-primary);
 }
 
-.editor-unified-header.is-merged {
+.editor-unified-header {
   display: flex;
-  align-items: stretch;
-  min-height: 35px;
-  height: auto;
+  flex-direction: column;
   flex-shrink: 0;
   background: var(--tab-bar-bg);
   border-bottom: 1px solid var(--border-color);
 }
 
-.editor-unified-header.is-merged .file-tabs {
-  flex: 0 1 auto;
-  min-width: 160px;
-  max-width: 52%;
+.markfly-app.is-window-fullscreen .editor-unified-header {
+  display: none;
+}
+
+.header-chrome {
+  display: flex;
+  align-items: stretch;
+  height: 35px;
+  min-height: 35px;
+  flex-shrink: 0;
+}
+
+.header-chrome .file-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
   height: 35px;
   min-height: 35px;
   border-bottom: none;
@@ -3100,35 +3214,28 @@ onUnmounted(() => {
 }
 
 .toolbar-host {
-  flex: 1 1 0;
-  min-width: 0;
   display: flex;
   align-items: center;
-  align-self: stretch;
-  justify-content: flex-end;
-  gap: 2px;
+  justify-content: flex-start;
+  min-height: 35px;
+  border-top: 1px solid var(--border-color);
 }
 
-/* 收起时仍占剩余宽度，箭头留在最右侧 */
 .toolbar-host.collapsed {
-  min-width: 28px;
+  display: none;
 }
 
 .toolbar-actions {
-  flex: 1 1 0;
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
   max-height: 35px;
   scrollbar-width: thin;
-}
-
-.toolbar-host.collapsed .toolbar-actions {
-  display: none;
 }
 
 .toolbar-toggle-btn {
@@ -3144,18 +3251,19 @@ onUnmounted(() => {
   cursor: pointer;
   flex: 0 0 auto;
   flex-shrink: 0;
-  margin-left: auto;
-  margin-right: 4px;
+  align-self: center;
+  margin: 0 6px 0 2px;
   transition: background-color 0.2s ease, color 0.2s ease;
-}
-
-.toolbar-host.collapsed .toolbar-toggle-btn {
-  color: var(--text-primary);
 }
 
 .toolbar-toggle-btn:hover {
   background: var(--hover-bg);
   color: var(--text-primary);
+}
+
+.toolbar-host .toolbar-toggle-btn.is-on-format-row {
+  margin-left: 2px;
+  margin-right: 8px;
 }
 
 .toolbar-actions :deep(.bytemd-toolbar) {
@@ -3170,7 +3278,7 @@ onUnmounted(() => {
   height: 35px !important;
   max-height: 35px !important;
   flex-wrap: nowrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   align-items: center;
   overflow: visible;
   box-sizing: border-box;
@@ -3178,7 +3286,7 @@ onUnmounted(() => {
 
 .toolbar-actions :deep(.bytemd-toolbar-left) {
   flex-wrap: nowrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .editor-main {
@@ -3242,7 +3350,8 @@ onUnmounted(() => {
   justify-content: flex-end;
   flex: 0 0 auto;
   gap: 2px;
-  padding-right: 4px;
+  padding: 0 4px 0 8px;
+  border-left: 1px solid var(--border-color);
 }
 
 .layout-mode-btn {

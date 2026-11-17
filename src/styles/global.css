@@ -337,6 +337,26 @@ html, body {
   color: var(--text-secondary) !important;
 }
 
+/* 宽表在格子里横滑，不把整篇预览撑歪 */
+.bytemd-preview .markdown-body .markfly-table-scroll,
+.markfly-preview-viewer.markdown-body .markfly-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 1em 0;
+  scrollbar-width: thin;
+  overscroll-behavior-x: contain;
+}
+
+.bytemd-preview .markdown-body .markfly-table-scroll > table,
+.markfly-preview-viewer.markdown-body .markfly-table-scroll > table {
+  display: table !important;
+  width: max-content;
+  max-width: none;
+  margin: 0 !important;
+  overflow: visible;
+}
+
 /* 预览区表格：统一简洁配色，覆盖 github-markdown-css 默认灰 */
 .bytemd-preview .markdown-body table th,
 .bytemd-preview .markdown-body table td,
@@ -344,6 +364,7 @@ html, body {
 .markfly-preview-viewer.markdown-body table td {
   border-color: var(--table-border) !important;
   padding: 8px 12px !important;
+  white-space: nowrap;
 }
 
 .bytemd-preview .markdown-body table th,

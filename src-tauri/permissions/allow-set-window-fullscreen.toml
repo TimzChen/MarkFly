@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-set-window-fullscreen"
+description = "Allows toggling borderless window fullscreen."
+commands.allow = ["set_window_fullscreen"]

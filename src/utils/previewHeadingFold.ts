@@ -153,8 +153,21 @@ export const applyHeadingFold = (root: HTMLElement) => {
   }
 }
 
+/** 宽表格单独横滑，避免把整篇预览撑出去 */
+export const wrapPreviewTables = (root: HTMLElement) => {
+  root.querySelectorAll('table').forEach((table) => {
+    if (table.parentElement?.classList.contains('markfly-table-scroll')) return
+    if (table.closest('pre, code, svg')) return
+    const wrap = document.createElement('div')
+    wrap.className = 'markfly-table-scroll'
+    table.before(wrap)
+    wrap.append(table)
+  })
+}
+
 export const createHeadingFoldPlugin = (): BytemdPlugin => ({
   viewerEffect({ markdownBody }) {
     applyHeadingFold(markdownBody)
+    wrapPreviewTables(markdownBody)
   },
 })

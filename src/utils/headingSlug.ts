@@ -1,3 +1,5 @@
+import { unescapeSafeMarkdownPunctuation } from './markdownEscapes'
+
 /**
  * 标题锚点按 VS Code Markdown 预览规则生成：
  * 去首尾空白、英文小写、空白变成 `-`、去掉中英文标点。
@@ -18,13 +20,14 @@ export function slugifyHeading(text: string): string {
 
 /** 去掉标题里的 Markdown 标记，只留纯文本再生成锚点 */
 export function headingPlainText(raw: string): string {
-  return raw
+  return unescapeSafeMarkdownPunctuation(raw)
     .replace(/`([^`]+)`/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/__([^_]+)__/g, '$1')
     .replace(/\*([^*]+)\*/g, '$1')
     .replace(/_([^_]+)_/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\*{2,}/g, '')
     .trim()
 }
 

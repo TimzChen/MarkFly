@@ -47,6 +47,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { headingPlainText } from '../utils/headingSlug'
 import { expandFoldsForElement, isHeadingFoldedAway } from '../utils/previewHeadingFold'
 
 type Heading = {
@@ -100,7 +101,7 @@ const extractHeadings = (markdown: string): Heading[] => {
     if (!match) continue
     matches.push({
       level: match[1].length,
-      text: match[2].trim(),
+      text: headingPlainText(match[2].trim()),
     })
   }
   return matches
