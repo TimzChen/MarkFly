@@ -5,7 +5,7 @@ mod file_watcher;
 mod instance_guard;
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::collections::HashSet;
 
@@ -534,12 +534,20 @@ fn filter_existing_files(app: tauri::AppHandle, paths: Vec<String>) -> Vec<Strin
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ListedMarkdownFile {
     path: String,
     name: String,
+    relative_dir: String,
 }
 
-fn is_markdown_filename(path: &std::path::Path) -> bool {
+struct MarkdownWalkEntry {
+    path: PathBuf,
+    name: String,
+    relative_dir: String,
+}
+
+fn is_markdown_filename(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| {
@@ -550,20 +558,48 @@ fn is_markdown_filename(path: &std::path::Path) -> bool {
 }
 
 fn should_skip_dir_name(name: &str) -> bool {
+    if name.starts_with('.') {
+        return true;
+    }
     matches!(
-        name,
-        "node_modules" | ".git" | "dist" | "target" | ".vs" | "__pycache__" | "vendor"
+        name.to_ascii_lowercase().as_str(),
+        "node_modules" | "dist" | "target" | "vendor" | "__pycache__"
     )
 }
 
-fn collect_markdown_files(
-    app: &tauri::AppHandle,
-    dir: &std::path::Path,
-    depth: u32,
-    out: &mut Vec<ListedMarkdownFile>,
-) {
-    const MAX_FILES: usize = 200;
-    const MAX_DEPTH: u32 = 4;
+fn entry_is_dir(entry: &fs::DirEntry) -> bool {
+    match entry.file_type() {
+        Ok(file_type) if file_type.is_dir() => true,
+        Ok(file_type) if file_type.is_symlink() => entry.path().is_dir(),
+        Ok(_) => false,
+        Err(_) => entry.path().is_dir(),
+    }
+}
+
+fn relative_dir_of(root: &Path, file: &Path) -> String {
+    let Some(parent) = file.parent() else {
+        return String::new();
+    };
+    match parent.strip_prefix(root) {
+        Ok(relative) if relative.as_os_str().is_empty() => String::new(),
+        Ok(relative) => relative.to_string_lossy().replace('\\', "/"),
+        Err(_) => parent
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    }
+}
+
+fn file_display_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("未命名.md")
+        .to_string()
+}
+
+fn walk_markdown_files(root: &Path, dir: &Path, depth: u32, out: &mut Vec<MarkdownWalkEntry>) {
+    const MAX_FILES: usize = 2000;
+    const MAX_DEPTH: u32 = 12;
     if out.len() >= MAX_FILES || depth > MAX_DEPTH {
         return;
     }
@@ -576,48 +612,41 @@ fn collect_markdown_files(
     let mut dirs = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-        if path.is_dir() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if entry_is_dir(&entry) {
             if should_skip_dir_name(&name) {
                 continue;
             }
             dirs.push(path);
-        } else if path.is_file() && is_markdown_filename(&path) {
+            continue;
+        }
+        if is_markdown_filename(&path) {
             files.push(path);
         }
     }
     files.sort();
     dirs.sort();
 
-    let fs_scope = app.fs_scope();
     for path in files {
         if out.len() >= MAX_FILES {
             return;
         }
-        let _ = fs_scope.allow_file(&path);
-        let Some(path_str) = path.to_str() else {
-            continue;
-        };
-        let name = path
-            .file_name()
-            .and_then(|value| value.to_str())
-            .unwrap_or("未命名.md")
-            .to_string();
-        out.push(ListedMarkdownFile {
-            path: path_str.to_string(),
-            name,
+        out.push(MarkdownWalkEntry {
+            name: file_display_name(&path),
+            relative_dir: relative_dir_of(root, &path),
+            path,
         });
     }
 
     for child in dirs {
-        collect_markdown_files(app, &child, depth + 1, out);
+        walk_markdown_files(root, &child, depth + 1, out);
         if out.len() >= MAX_FILES {
             return;
         }
     }
 }
 
-/// 列出用户选中目录下的 Markdown / 文本文件，供知识库「目录」页签浏览
+/// 列出用户选中目录及其子目录下的 Markdown / 文本文件，供知识库「目录」页签浏览
 #[tauri::command]
 fn list_markdown_files(app: tauri::AppHandle, path: String) -> Result<Vec<ListedMarkdownFile>, String> {
     let dir = PathBuf::from(&path);
@@ -625,9 +654,80 @@ fn list_markdown_files(app: tauri::AppHandle, path: String) -> Result<Vec<Listed
         return Err(format!("不是有效文件夹: {}", dir.display()));
     }
     let _ = app.fs_scope().allow_directory(&dir, true);
-    let mut files = Vec::new();
-    collect_markdown_files(&app, &dir, 0, &mut files);
+    let mut found = Vec::new();
+    walk_markdown_files(&dir, &dir, 0, &mut found);
+
+    let fs_scope = app.fs_scope();
+    let mut files = Vec::with_capacity(found.len());
+    for entry in found {
+        let _ = fs_scope.allow_file(&entry.path);
+        let Some(path_str) = entry.path.to_str() else {
+            continue;
+        };
+        files.push(ListedMarkdownFile {
+            path: path_str.to_string(),
+            name: entry.name,
+            relative_dir: entry.relative_dir,
+        });
+    }
     Ok(files)
+}
+
+#[cfg(test)]
+mod list_markdown_tests {
+    use super::*;
+
+    fn write_md(path: &Path, body: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(path, body).unwrap();
+    }
+
+    fn listed_keys(entries: &[MarkdownWalkEntry]) -> Vec<String> {
+        entries
+            .iter()
+            .map(|item| {
+                if item.relative_dir.is_empty() {
+                    item.name.clone()
+                } else {
+                    format!("{}/{}", item.relative_dir, item.name)
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn walks_nested_markdown_and_skips_junk() {
+        let root = std::env::temp_dir().join(format!(
+            "markfly-md-walk-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        write_md(&root.join("root.md"), "# root");
+        write_md(&root.join("sub").join("child.md"), "# child");
+        write_md(&root.join("sub").join("deep").join("nested.md"), "# nested");
+        write_md(&root.join(".hidden").join("secret.md"), "# hidden");
+        write_md(&root.join("node_modules").join("pkg.md"), "# pkg");
+        write_md(&root.join("notes.txt"), "txt");
+
+        let mut out = Vec::new();
+        walk_markdown_files(&root, &root, 0, &mut out);
+        let keys = listed_keys(&out);
+        let _ = fs::remove_dir_all(&root);
+
+        assert!(keys.contains(&"root.md".to_string()));
+        assert!(keys.contains(&"notes.txt".to_string()));
+        assert!(keys.contains(&"sub/child.md".to_string()));
+        assert!(keys.contains(&"sub/deep/nested.md".to_string()));
+        assert!(!keys.iter().any(|item| item.contains("secret")));
+        assert!(!keys.iter().any(|item| item.contains("pkg")));
+    }
 }
 
 fn is_case_only_rename(from: &PathBuf, to: &PathBuf) -> bool {

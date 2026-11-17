@@ -14,6 +14,19 @@
           </svg>
         </button>
         <button
+          v-if="kbPane === 'folder' && folderName"
+          class="action-btn"
+          :class="{ 'is-busy': folderRefreshing }"
+          title="刷新目录"
+          :aria-busy="folderRefreshing"
+          @click="$emit('refreshFolder')"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+            <path d="M3 12a9 9 0 0 1 15.5-6.4M21 12a9 9 0 0 1-15.5 6.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M18.5 5.6V9h-3.4M5.5 18.4V15h3.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button
           class="action-btn danger"
           :disabled="clearDisabled"
           :title="clearTitle"
@@ -160,40 +173,62 @@
       </div>
       <div v-else-if="folderFiles.length === 0" class="kb-empty">
         <p>{{ folderName }}</p>
-        <span>这个文件夹里没有 Markdown / 文本文件</span>
+        <span>这个文件夹及其子目录里没有 Markdown / 文本文件</span>
       </div>
-      <div
-        v-for="item in folderFiles"
-        :key="item.path"
-        class="file-item is-recent"
-        :class="{ active: item.path === activeFile }"
-        :title="item.path"
-        @click="$emit('selectFolderFile', item.path)"
-        @contextmenu.prevent.stop="openFolderItemMenu($event, item)"
-      >
-        <div class="file-icon">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" fill="none"/>
-            <polyline points="14,2 14,8 20,8" stroke="currentColor" stroke-width="2"/>
-          </svg>
+      <template v-for="row in folderRows" :key="row.kind === 'dir' ? `dir:${row.key}` : row.item.path">
+        <button
+          v-if="row.kind === 'dir'"
+          type="button"
+          class="file-item is-dir"
+          :class="{ 'is-collapsed': row.collapsed }"
+          :style="treePad(row.depth)"
+          :title="row.key"
+          :aria-expanded="!row.collapsed"
+          @click="toggleDir(row.key)"
+        >
+          <span class="tree-twist" :class="{ 'is-open': !row.collapsed }">
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M6 3.5 12 8 6 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span class="file-icon is-folder">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M3 7h6l2 2h10v10H3V7z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span class="file-name">{{ row.name }}</span>
+        </button>
+        <div
+          v-else
+          class="file-item is-recent"
+          :class="{ active: row.item.path === activeFile }"
+          :style="treePad(row.depth)"
+          :title="row.item.path"
+          @click="$emit('selectFolderFile', row.item.path)"
+          @contextmenu.prevent.stop="openFolderItemMenu($event, row.item)"
+        >
+          <span class="tree-twist is-leaf" aria-hidden="true" />
+          <div class="file-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="currentColor" stroke-width="2" fill="none"/>
+              <polyline points="14,2 14,8 20,8" stroke="currentColor" stroke-width="2"/>
+            </svg>
+          </div>
+          <div class="file-meta">
+            <input
+              v-if="renamingPath === row.item.path"
+              :ref="bindRenameInput"
+              class="file-rename-input"
+              v-model="renameDraft"
+              @click.stop
+              @pointerdown.stop
+              @keydown="onRenameKeydown"
+              @blur="commitRename"
+            />
+            <span v-else class="file-name">{{ row.item.name }}</span>
+          </div>
         </div>
-        <div class="file-meta">
-          <input
-            v-if="renamingPath === item.path"
-            :ref="bindRenameInput"
-            class="file-rename-input"
-            v-model="renameDraft"
-            @click.stop
-            @pointerdown.stop
-            @keydown="onRenameKeydown"
-            @blur="commitRename"
-          />
-          <template v-else>
-            <span class="file-name">{{ item.name }}</span>
-            <span v-if="item.parentDir" class="file-parent">{{ item.parentDir }}</span>
-          </template>
-        </div>
-      </div>
+      </template>
     </div>
 
     <Teleport to="body">
@@ -272,6 +307,9 @@
           <button type="button" class="kb-menu-item" @click="run(() => emit('revealPath', menu.item.path))">
             打开文件目录
           </button>
+          <button type="button" class="kb-menu-item" @click="run(() => emit('refreshFolder'))">
+            刷新目录
+          </button>
         </template>
 
         <template v-else-if="menu.kind === 'recent'">
@@ -321,6 +359,14 @@
           </template>
           <template v-else-if="kbPane === 'folder'">
             <div class="kb-menu-sep" />
+            <button
+              v-if="folderName"
+              type="button"
+              class="kb-menu-item"
+              @click="run(() => emit('refreshFolder'))"
+            >
+              刷新目录
+            </button>
             <button type="button" class="kb-menu-item" @click="run(() => emit('openFolder'))">
               选择文件夹...
             </button>
@@ -342,6 +388,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { FileItem } from '../data/sampleFiles'
+import { flattenFolderTree, treePad } from '../utils/folderTree'
 import { isDiskFilePath } from '../utils/previewAssets'
 import { sameFilePath, type KnowledgePane, type RecentFile } from '../utils/recentFiles'
 
@@ -356,16 +403,20 @@ const props = withDefaults(defineProps<{
   recents: RecentFile[]
   folderFiles: RecentFile[]
   folderName: string
+  folderPath?: string
   startRenamePath: string
   activeFile: string
   kbPane: KnowledgePane
+  folderRefreshing?: boolean
   collapsed?: boolean
   width?: number
 }>(), {
   collapsed: false,
+  folderRefreshing: false,
   width: 280,
   folderFiles: () => [],
   folderName: '',
+  folderPath: '',
   startRenamePath: '',
 })
 
@@ -382,6 +433,7 @@ const emit = defineEmits<{
   removeRecent: [path: string]
   clearRecents: []
   closeFolder: []
+  refreshFolder: []
   changePane: [pane: KnowledgePane]
   revealPath: [path: string]
   refreshFile: [file: FileItem]
@@ -414,6 +466,24 @@ const clearDisabled = computed(() => {
   if (props.kbPane === 'recents') return props.recents.length === 0
   return !props.folderName
 })
+
+const collapsedDirs = ref<Record<string, boolean>>({})
+
+const folderRows = computed(() => flattenFolderTree(props.folderFiles, collapsedDirs.value))
+
+const toggleDir = (key: string) => {
+  collapsedDirs.value = {
+    ...collapsedDirs.value,
+    [key]: !collapsedDirs.value[key],
+  }
+}
+
+watch(
+  () => props.folderPath || props.folderName,
+  () => {
+    collapsedDirs.value = {}
+  }
+)
 
 const clearTitle = computed(() => {
   if (props.kbPane === 'opened') {
@@ -646,16 +716,41 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background-color 0.15s, color 0.15s;
+  transition: background-color 0.15s, color 0.15s, transform 0.12s;
 }
 
 .action-btn:hover:not(:disabled) {
   color: var(--accent-color);
+  background: var(--hover-bg);
+}
+
+.action-btn:active:not(:disabled) {
+  transform: scale(0.9);
+  color: var(--accent-color);
+  background: var(--hover-bg);
 }
 
 .action-btn.danger:hover:not(:disabled) {
   background: color-mix(in srgb, var(--danger-color) 14%, transparent);
   color: var(--danger-color);
+}
+
+.action-btn.danger:active:not(:disabled) {
+  background: color-mix(in srgb, var(--danger-color) 22%, transparent);
+}
+
+.action-btn.is-busy {
+  color: var(--accent-color);
+}
+
+.action-btn.is-busy svg {
+  animation: kb-refresh-spin 1.25s linear infinite;
+}
+
+@keyframes kb-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .action-btn:disabled {
@@ -783,6 +878,47 @@ onUnmounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.file-item.is-dir {
+  width: 100%;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+
+.file-item.is-dir .file-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.file-icon.is-folder {
+  color: var(--text-secondary);
+}
+
+.tree-twist {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+}
+
+.tree-twist svg {
+  display: block;
+  transform: rotate(0deg);
+  transition: transform 0.15s ease;
+}
+
+.tree-twist.is-open svg {
+  transform: rotate(90deg);
+}
+
+.tree-twist.is-leaf {
+  visibility: hidden;
 }
 
 .row-close {

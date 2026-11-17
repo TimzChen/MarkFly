@@ -64,3 +64,12 @@ export async function tauriOnWindowResized(handler: () => void): Promise<Unliste
     handler()
   })
 }
+
+export async function tauriOnWindowFocusChanged(
+  handler: (focused: boolean) => void
+): Promise<UnlistenFn> {
+  const { getCurrentWindow } = await import('@tauri-apps/api/window')
+  return getCurrentWindow().onFocusChanged((event) => {
+    handler(event.payload)
+  })
+}

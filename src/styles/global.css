@@ -570,3 +570,90 @@ html, body {
   padding: 16px 0;
   font-size: 13px;
 }
+
+/* 预览正文：按标题折叠本节（到下一个同级/更高级标题） */
+.bytemd-preview .markdown-body .markfly-fold,
+.markfly-preview-viewer.markdown-body .markfly-fold {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+/* 标题行用 flex，三角和文字真正垂直居中 */
+.bytemd-preview .markdown-body .markfly-fold > :is(h1, h2, h3, h4, h5, h6),
+.markfly-preview-viewer.markdown-body .markfly-fold > :is(h1, h2, h3, h4, h5, h6) {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+}
+
+.bytemd-preview .markdown-body .markfly-fold-title,
+.markfly-preview-viewer.markdown-body .markfly-fold-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.bytemd-preview .markdown-body .markfly-fold-btn,
+.markfly-preview-viewer.markdown-body .markfly-fold-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  font-size: 1em;
+  width: 1em;
+  height: 1em;
+  min-width: 18px;
+  min-height: 18px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  line-height: 0;
+  user-select: none;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.12s ease;
+}
+
+.bytemd-preview .markdown-body .markfly-fold-btn:hover,
+.markfly-preview-viewer.markdown-body .markfly-fold-btn:hover {
+  color: var(--accent-color);
+  background: var(--hover-bg);
+}
+
+.bytemd-preview .markdown-body .markfly-fold-btn:active,
+.markfly-preview-viewer.markdown-body .markfly-fold-btn:active {
+  transform: scale(0.9);
+  color: var(--accent-color);
+}
+
+.bytemd-preview .markdown-body .markfly-fold-btn svg,
+.markfly-preview-viewer.markdown-body .markfly-fold-btn svg {
+  display: block;
+  width: 0.78em;
+  height: 0.78em;
+  min-width: 12px;
+  min-height: 12px;
+  transform-origin: 50% 50%;
+  transform: none;
+  transition: transform 0.18s ease;
+}
+
+.bytemd-preview .markdown-body .markfly-fold.is-collapsed > :is(h1, h2, h3, h4, h5, h6) .markfly-fold-btn svg,
+.markfly-preview-viewer.markdown-body .markfly-fold.is-collapsed > :is(h1, h2, h3, h4, h5, h6) .markfly-fold-btn svg {
+  transform: rotate(-90deg);
+}
+
+.bytemd-preview .markdown-body .markfly-fold.is-collapsed > :not(:is(h1, h2, h3, h4, h5, h6)),
+.markfly-preview-viewer.markdown-body .markfly-fold.is-collapsed > :not(:is(h1, h2, h3, h4, h5, h6)) {
+  display: none !important;
+}

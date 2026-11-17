@@ -331,9 +331,11 @@
         :recents="recentFiles"
         :folderFiles="folderFiles"
         :folderName="kbFolderName"
+        :folderPath="kbFolderPath"
         :startRenamePath="startRenamePath"
         :activeFile="currentFilePath"
         :kbPane="kbPane"
+        :folderRefreshing="folderRefreshing"
         :collapsed="sidebarCollapsed"
         :width="fileTreeWidth"
         @selectFile="selectFile"
@@ -348,6 +350,7 @@
         @removeRecent="removeRecentItem"
         @clearRecents="clearRecentItems"
         @closeFolder="closeKbFolder"
+        @refreshFolder="() => refreshFolderFiles({ feedback: true })"
         @changePane="kbPane = $event"
         @revealPath="revealPathInExplorer"
         @refreshFile="refreshFileFromDisk"
@@ -466,6 +469,12 @@ import { lightMarkdownToHtml } from './utils/lightMarkdown'
 import { needsFullPreview, stripFrontmatter } from './utils/markdownPreview'
 import { consumeMediumPreviewPreload, createCorePreviewPlugins, startMediumPreviewPreload } from './utils/previewEngine'
 import {
+  applyHeadingFold,
+  bindPreviewFoldDoc,
+  forgetPreviewFoldDoc,
+  migratePreviewFoldDoc,
+} from './utils/previewHeadingFold'
+import {
   allowMarkdownAssets,
   fixPreviewImages,
   isDiskFilePath,
@@ -506,6 +515,7 @@ import {
   tauriIsFullscreen,
   tauriSetFullscreen,
   tauriOnWindowResized,
+  tauriOnWindowFocusChanged,
 } from './utils/tauriBridge'
 
 import type { BytemdPlugin } from 'bytemd'
@@ -667,6 +677,7 @@ const lastExternalContents = new Map<string, string>()
 const watchSuppressUntil = new Map<string, number>()
 let unlistenFileChanged: (() => void) | null = null
 let unlistenWindowResized: (() => void) | null = null
+let unlistenWindowFocusChanged: (() => void) | null = null
 const tabContextMenu = ref<TabContextMenuState | null>(null)
 /** 防止右键抬起触发的 click 立刻关掉刚打开的菜单 */
 let tabContextMenuOpenedAt = 0
@@ -699,6 +710,7 @@ const revealExternalChangeBanner = (filePath: string) => {
 
 // 计算属性
 const currentFilePath = computed(() => currentFile.value?.path ?? '')
+bindPreviewFoldDoc(() => currentFilePath.value)
 const showUnifiedHeader = computed(() => files.value.length > 0 && !!currentFile.value)
 const usePreviewViewer = computed(() => editorLayout.value === 'preview-only')
 /** 当前文件有外部变更且未主动关闭横幅时显示 */
@@ -939,8 +951,13 @@ const previewHtml = computed(() => {
   const filePath = currentFilePath.value
   let html = ''
   if (previewEngineReady.value && bytemdGetProcessor && plugins.value.length > 0) {
-    html = bytemdGetProcessor(getPreviewProcessorOptions()).processSync(source).toString()
-    html = normalizePreviewHtml(html)
+    try {
+      html = bytemdGetProcessor(getPreviewProcessorOptions()).processSync(source).toString()
+      html = normalizePreviewHtml(html)
+    } catch (error) {
+      console.error('预览渲染失败:', error)
+      html = lightMarkdownToHtml(source)
+    }
   } else if (needsFullPreview(markdown.value)) {
     return '<p class="preview-loading-hint">正在加载完整预览…</p>'
   } else {
@@ -955,25 +972,34 @@ const applyPreviewViewerEffects = () => {
 
   const body = previewBodyRef.value
   if (!body || !previewEngineReady.value || !bytemdGetProcessor) {
-    if (body) bindPreviewImageZoom(body)
+    if (body) {
+      bindPreviewImageZoom(body)
+      applyHeadingFold(body)
+    }
     ensurePreviewLinkBindings()
     consumePendingPreviewHash()
+    if (Date.now() <= restoreViewUntil) restoreDocumentView()
     return
   }
 
   fixPreviewImages(body, currentFilePath.value)
 
-  const file = bytemdGetProcessor(getPreviewProcessorOptions()).processSync(previewSource.value)
-  for (const plugin of plugins.value) {
-    const cleanup = plugin.viewerEffect?.({ markdownBody: body, file } as never)
-    if (typeof cleanup === 'function') {
-      previewViewerEffectCleanups.push(cleanup)
+  try {
+    const file = bytemdGetProcessor(getPreviewProcessorOptions()).processSync(previewSource.value)
+    for (const plugin of plugins.value) {
+      const cleanup = plugin.viewerEffect?.({ markdownBody: body, file } as never)
+      if (typeof cleanup === 'function') {
+        previewViewerEffectCleanups.push(cleanup)
+      }
     }
+  } catch (error) {
+    console.error('预览插件执行失败:', error)
   }
 
   bindPreviewImageZoom(body)
   ensurePreviewLinkBindings()
   consumePendingPreviewHash()
+  if (Date.now() <= restoreViewUntil) restoreDocumentView()
 }
 
 const syncPreviewAssets = async () => {
@@ -1027,25 +1053,39 @@ const locale = {
 // 方法
 const handleChange = (value: string) => {
   markdown.value = value
+  // ByteMD 在切换文档时会 setValue，并触发 change；内容没变就不要当成用户编辑
+  if (currentFile.value && value === currentFile.value.content) {
+    if (Date.now() <= restoreViewUntil) restoreDocumentView()
+    return
+  }
   if (currentFile.value) {
     currentFile.value.content = value
     currentFile.value.dirty = true
   }
   isModified.value = true
-  
-  // 更新光标位置（简化版本）
+
+  const cursor = getCodeMirror()?.getCursor()
+  if (cursor) {
+    currentLine.value = cursor.line + 1
+    currentColumn.value = cursor.ch + 1
+    return
+  }
   const lines = value.split('\n')
   currentLine.value = lines.length
   currentColumn.value = lines[lines.length - 1].length + 1
 }
 
 const selectFile = async (file: FileItem) => {
+  const previousPath = currentFile.value?.path ?? ''
+  const switched = previousPath !== file.path
   if (currentFile.value) {
     currentFile.value.content = markdown.value
+    if (switched) captureDocumentView(previousPath)
   }
   currentFile.value = file
   markdown.value = file.content
   isModified.value = !!file.dirty
+  if (switched && !pendingPreviewHash) beginRestoreDocumentView()
   void checkPendingExternalChange(file)
   if (needsFullPreview(file.content)) {
     startMediumPreviewPreload(file.content)
@@ -1053,6 +1093,7 @@ const selectFile = async (file: FileItem) => {
   }
   await ensurePreviewPipeline()
   void syncPreviewAssets()
+  if (switched && !pendingPreviewHash) beginRestoreDocumentView()
 }
 
 const untitledMarkdown = (title: string) => `# ${title}\n\n`
@@ -1127,6 +1168,12 @@ const applyRenamedPath = (from: string, to: string, newName: string) => {
     lastExternalContents.set(to, cached)
   }
   watchSuppressUntil.delete(from)
+  const savedView = documentViews.get(from)
+  if (savedView) {
+    documentViews.delete(from)
+    documentViews.set(to, savedView)
+  }
+  migratePreviewFoldDoc(from, to)
   if (isDiskFilePath(to)) {
     markFileSavedOnDisk(to)
     recentFiles.value = removeRecentFile(from)
@@ -1198,18 +1245,26 @@ const isFileDirty = (file: FileItem) =>
 const removeOpenFile = (file: FileItem) => {
   const index = files.value.findIndex((item) => item.path === file.path)
   if (index < 0) return
+  const closingPath = file.path
+  const closingCurrent = closingPath === currentFilePath.value
   files.value.splice(index, 1)
   clearExternalChange(file.path)
   watchSuppressUntil.delete(file.path)
-  if (file.path !== currentFilePath.value) return
-  if (files.value.length > 0) {
-    selectFile(files.value[Math.max(0, index - 1)])
+  forgetPreviewFoldDoc(closingPath)
+  if (!closingCurrent) {
+    documentViews.delete(closingPath)
     return
   }
-  currentFile.value = null
-  markdown.value = ''
-  isModified.value = false
-  if (recentFiles.value.length > 0) revealKnowledgeRecents()
+  if (files.value.length > 0) {
+    selectFile(files.value[Math.max(0, index - 1)])
+  } else {
+    currentFile.value = null
+    markdown.value = ''
+    isModified.value = false
+    restoreViewUntil = 0
+    if (recentFiles.value.length > 0) revealKnowledgeRecents()
+  }
+  documentViews.delete(closingPath)
 }
 
 const closeFiles = async (targets: FileItem[]) => {
@@ -1257,6 +1312,7 @@ const revealPathInExplorer = async (filePath: string) => {
 type ListedMarkdownFile = {
   path: string
   name: string
+  relativeDir?: string
 }
 
 const loadFolderFiles = async (dir: string) => {
@@ -1264,17 +1320,49 @@ const loadFolderFiles = async (dir: string) => {
   folderFiles.value = listed.map((item) => ({
     path: item.path,
     name: item.name,
-    parentDir: getParentDirName(item.path),
+    parentDir: typeof item.relativeDir === 'string' ? item.relativeDir : getParentDirName(item.path),
   }))
 }
 
-const refreshFolderFiles = async () => {
-  if (!kbFolderPath.value) return
+const folderRefreshing = ref(false)
+let folderRefreshGen = 0
+
+const refreshFolderFiles = async (opts?: { feedback?: boolean }) => {
+  if (!kbFolderPath.value || folderRefreshing.value) return
+  const showSpin = !!opts?.feedback
+  const gen = ++folderRefreshGen
+  if (showSpin) folderRefreshing.value = true
+  const startedAt = Date.now()
   try {
     await loadFolderFiles(kbFolderPath.value)
   } catch (error) {
     console.error('刷新目录失败:', error)
+    showTransientNotice('刷新目录失败')
+  } finally {
+    if (!showSpin) return
+    // 列表没变化时也要让图标转一会儿，否则看不出点中了
+    const wait = Math.max(0, 450 - (Date.now() - startedAt))
+    if (wait) await new Promise((resolve) => window.setTimeout(resolve, wait))
+    if (gen === folderRefreshGen) folderRefreshing.value = false
   }
+}
+
+let folderRefreshTimer = 0
+
+const scheduleFolderRefresh = () => {
+  if (kbPane.value !== 'folder' || !kbFolderPath.value) return
+  window.clearTimeout(folderRefreshTimer)
+  folderRefreshTimer = window.setTimeout(() => {
+    void refreshFolderFiles()
+  }, 120)
+}
+
+const onWindowFocusRefreshFolder = () => {
+  scheduleFolderRefresh()
+}
+
+const onTauriFocusChanged = (focused: boolean) => {
+  if (focused) scheduleFolderRefresh()
 }
 
 const openFolderFile = async (filePath: string) => {
@@ -1305,6 +1393,8 @@ const openFolder = async () => {
 }
 
 const closeKbFolder = () => {
+  folderRefreshGen += 1
+  folderRefreshing.value = false
   kbFolderPath.value = ''
   folderFiles.value = []
   kbPane.value = files.value.length > 0 ? 'opened' : 'recents'
@@ -1910,6 +2000,8 @@ let pendingPreviewHashUntil = 0
 const setPendingPreviewHash = (hash: string) => {
   pendingPreviewHash = hash
   pendingPreviewHashUntil = hash ? Date.now() + 3000 : 0
+  // 锚点跳转优先；清掉进行中的滚动还原，避免稍后把标题位置盖掉
+  if (hash) cancelRestoreDocumentView()
 }
 
 const getPreviewScrollRoot = (): HTMLElement | null => {
@@ -1917,16 +2009,153 @@ const getPreviewScrollRoot = (): HTMLElement | null => {
   return (editorContentRef.value?.querySelector('.bytemd-preview') as HTMLElement | null) ?? null
 }
 
+type CodeMirrorPos = { line: number; ch: number }
+
+type CodeMirrorHost = HTMLElement & {
+  CodeMirror?: {
+    setCursor: (line: number, ch: number, options?: { scroll?: boolean }) => void
+    scrollTo: (x: number | null, y: number | null) => void
+    getCursor: () => CodeMirrorPos
+    getScrollInfo: () => { left: number; top: number }
+  }
+}
+
+type DocumentViewState = {
+  editorLeft: number
+  editorTop: number
+  cursorLine: number
+  cursorCh: number
+  previewTop: number
+}
+
+/** 每个打开文档各自记住滚动/光标；只活在本次进程里 */
+const documentViews = new Map<string, DocumentViewState>()
+let restoreViewEpoch = 0
+let restoreViewUntil = 0
+let applyingDocumentView = false
+const restoreViewTimers: number[] = []
+
+const getCodeMirror = () => {
+  const cmHost = editorContentRef.value?.querySelector('.CodeMirror') as CodeMirrorHost | null
+  return cmHost?.CodeMirror ?? null
+}
+
+const captureDocumentView = (path: string) => {
+  if (!path) return
+  const previous = documentViews.get(path)
+  const cm = getCodeMirror()
+  const cursor = cm?.getCursor()
+  const scroll = cm?.getScrollInfo()
+  const preview = getPreviewScrollRoot()
+  documentViews.set(path, {
+    editorLeft: scroll?.left ?? previous?.editorLeft ?? 0,
+    editorTop: scroll?.top ?? previous?.editorTop ?? 0,
+    cursorLine: cursor?.line ?? previous?.cursorLine ?? 0,
+    cursorCh: cursor?.ch ?? previous?.cursorCh ?? 0,
+    previewTop:
+      preview && preview.offsetParent !== null
+        ? preview.scrollTop
+        : previous?.previewTop ?? 0,
+  })
+}
+
+const restoreDocumentView = () => {
+  if (pendingPreviewHash) return
+  if (Date.now() > restoreViewUntil) return
+  const path = currentFilePath.value
+  const state = path ? documentViews.get(path) : undefined
+  const previewTop = state?.previewTop ?? 0
+  const editorLeft = state?.editorLeft ?? 0
+  const editorTop = state?.editorTop ?? 0
+  const cursorLine = state?.cursorLine ?? 0
+  const cursorCh = state?.cursorCh ?? 0
+
+  applyingDocumentView = true
+  const cm = getCodeMirror()
+  if (cm) {
+    cm.setCursor(cursorLine, cursorCh, { scroll: false })
+    cm.scrollTo(editorLeft, editorTop)
+  }
+  getPreviewScrollRoot()?.scrollTo(0, previewTop)
+  currentLine.value = cursorLine + 1
+  currentColumn.value = cursorCh + 1
+  requestAnimationFrame(() => {
+    applyingDocumentView = false
+  })
+}
+
+const clearRestoreViewTimers = () => {
+  restoreViewTimers.forEach((id) => window.clearTimeout(id))
+  restoreViewTimers.length = 0
+}
+
+const cancelRestoreDocumentView = () => {
+  restoreViewEpoch += 1
+  restoreViewUntil = 0
+  clearRestoreViewTimers()
+}
+
+const RESTORE_CANCEL_KEYS = new Set([
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'PageUp',
+  'PageDown',
+  'Home',
+  'End',
+  ' ',
+])
+
+/** ByteMD setValue / 预览重绘会把滚动冲掉，切文档后分几拍把位置捞回来 */
+const beginRestoreDocumentView = () => {
+  if (pendingPreviewHash) return
+  const epoch = ++restoreViewEpoch
+  restoreViewUntil = Date.now() + 4000
+  clearRestoreViewTimers()
+  const run = () => {
+    if (epoch !== restoreViewEpoch) return
+    restoreDocumentView()
+  }
+  nextTick(run)
+  requestAnimationFrame(() => {
+    requestAnimationFrame(run)
+  })
+  restoreViewTimers.push(
+    window.setTimeout(run, 80),
+    window.setTimeout(run, 320),
+    window.setTimeout(run, 500)
+  )
+}
+
+/** 只把用户手势当成「不要再抢滚动」；Mermaid 撑开 / ByteMD 同步滚动不要取消还原 */
+const onRestoreUserIntent = (event?: Event) => {
+  if (applyingDocumentView) return
+  if (Date.now() > restoreViewUntil) return
+  if (event instanceof KeyboardEvent && !RESTORE_CANCEL_KEYS.has(event.key)) return
+  cancelRestoreDocumentView()
+}
+
+const onMermaidLayoutSettled = () => {
+  if (pendingPreviewHash) {
+    consumePendingPreviewHash()
+    return
+  }
+  restoreDocumentView()
+}
+
 const consumePendingPreviewHash = () => {
   if (!pendingPreviewHash) return
   if (Date.now() > pendingPreviewHashUntil) {
     pendingPreviewHash = ''
+    beginRestoreDocumentView()
     return
   }
   const root = getPreviewScrollRoot()
   if (!root) return
   if (scrollPreviewToAnchor(root, pendingPreviewHash, 'auto')) {
     pendingPreviewHash = ''
+    cancelRestoreDocumentView()
   }
 }
 
@@ -2143,6 +2372,17 @@ const handleKeyDown = (event: KeyboardEvent) => {
     }
     return
   }
+  // F5：目录页签刷新文件列表，否则重读当前文件
+  if (event.key === 'F5' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    event.preventDefault()
+    event.stopPropagation()
+    if (kbPane.value === 'folder' && kbFolderPath.value) {
+      void refreshFolderFiles({ feedback: true })
+    } else if (currentFile.value) {
+      void refreshFileFromDisk(currentFile.value)
+    }
+    return
+  }
   // Ctrl/Cmd + O 打开文件
   if ((event.ctrlKey || event.metaKey) && event.key === 'o') {
     event.preventDefault()
@@ -2183,6 +2423,11 @@ onMounted(async () => {
   window.addEventListener('click', onWindowClickCloseTabMenu)
   window.addEventListener('blur', onWindowClickCloseTabMenu)
   window.addEventListener('beforeunload', persistOpenSession)
+  window.addEventListener('markfly-mermaid-done', onMermaidLayoutSettled)
+  window.addEventListener('focus', onWindowFocusRefreshFolder)
+  editorContentRef.value?.addEventListener('wheel', onRestoreUserIntent, { capture: true, passive: true })
+  editorContentRef.value?.addEventListener('pointerdown', onRestoreUserIntent, true)
+  editorContentRef.value?.addEventListener('keydown', onRestoreUserIntent, true)
 
   // 尽早关闭 boot 层，避免 PageLoad Finished 再次注入 boot 盖住 Vue UI
   await hideBootLayer()
@@ -2309,6 +2554,11 @@ const setupDeferredAppServices = async () => {
   } catch {
     // 浏览器预览没有窗口 API
   }
+  try {
+    unlistenWindowFocusChanged = await tauriOnWindowFocusChanged(onTauriFocusChanged)
+  } catch {
+    // 浏览器预览没有窗口 API
+  }
   scheduleToolbarMount()
   nextTick(setupToolbarObserver)
   clampSidebarBtnPosition()
@@ -2338,6 +2588,8 @@ watch(showUnifiedHeader, (visible) => {
 })
 
 watch(editorLayout, async (layout) => {
+  captureDocumentView(currentFilePath.value)
+  if (!pendingPreviewHash) beginRestoreDocumentView()
   if (layout !== 'preview-only') {
     await loadMediumPlugins()
     await ensureEditorComponent()
@@ -2349,6 +2601,7 @@ watch(editorLayout, async (layout) => {
   } else {
     scheduleToolbarMount()
   }
+  if (!pendingPreviewHash) beginRestoreDocumentView()
 })
 
 watch(currentFilePath, () => {
@@ -2356,6 +2609,10 @@ watch(currentFilePath, () => {
   closeTabContextMenu()
   scheduleToolbarMount()
   nextTick(setupToolbarObserver)
+})
+
+watch(kbPane, (pane) => {
+  if (pane === 'folder') void refreshFolderFiles()
 })
 
 watch(markdown, (content) => {
@@ -2385,12 +2642,20 @@ onUnmounted(() => {
   window.removeEventListener('blur', onWindowClickCloseTabMenu)
   window.removeEventListener('beforeunload', persistOpenSession)
   window.removeEventListener('resize', clampSidebarBtnPosition)
+  window.removeEventListener('markfly-mermaid-done', onMermaidLayoutSettled)
+  window.removeEventListener('focus', onWindowFocusRefreshFolder)
+  editorContentRef.value?.removeEventListener('wheel', onRestoreUserIntent, true)
+  editorContentRef.value?.removeEventListener('pointerdown', onRestoreUserIntent, true)
+  editorContentRef.value?.removeEventListener('keydown', onRestoreUserIntent, true)
+  window.clearTimeout(folderRefreshTimer)
+  clearRestoreViewTimers()
   railBodyObserver?.disconnect()
   railBodyObserver = null
   window.clearTimeout(fullscreenResizeTimer)
   clearToolbarMountTimers()
   unlistenFileChanged?.()
   unlistenWindowResized?.()
+  unlistenWindowFocusChanged?.()
   toolbarObserver?.disconnect()
   unbindPreviewImageZoom(previewBodyRef.value)
   unbindPreviewLinkNavigation(editorContentRef.value)

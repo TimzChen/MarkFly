@@ -47,6 +47,7 @@ const applyMermaidConfig = (mermaid: MermaidApi) => {
     flowchart: {
       htmlLabels: true,
       useMaxWidth: true,
+      defaultRenderer: 'elk',
       padding: 12,
       nodeSpacing: 40,
       rankSpacing: 50,
@@ -63,7 +64,7 @@ const renderError = (container: HTMLElement, message: string) => {
 }
 
 /**
- * 自管 Mermaid 渲染：布局对齐 Cursor，配色走 base + 主题变量。
+ * 自管 Mermaid 渲染：flowchart 走 ELK（与 Cursor 同引擎），配色走 base + 主题变量。
  * 工具栏「插入图表」仍复用 @bytemd/plugin-mermaid 的 actions。
  */
 export const createMermaidPlugin = async (): Promise<BytemdPlugin> => {
@@ -73,6 +74,7 @@ export const createMermaidPlugin = async (): Promise<BytemdPlugin> => {
   ])
   const toolbar = mermaidByteMd()
   let seq = 0
+  let renderEpoch = 0
 
   return {
     actions: toolbar.actions,
@@ -80,11 +82,19 @@ export const createMermaidPlugin = async (): Promise<BytemdPlugin> => {
       const blocks = markdownBody.querySelectorAll('pre > code.language-mermaid')
       if (blocks.length === 0) return
 
+      const epoch = ++renderEpoch
+      let pending = blocks.length
       applyMermaidConfig(mermaid)
 
       blocks.forEach((code, index) => {
         const pre = code.parentElement
-        if (!pre) return
+        if (!pre) {
+          pending -= 1
+          if (pending === 0) {
+            markdownBody.dispatchEvent(new CustomEvent('markfly-mermaid-done', { bubbles: true }))
+          }
+          return
+        }
 
         const source = code.textContent || ''
         const container = document.createElement('div')
@@ -97,15 +107,28 @@ export const createMermaidPlugin = async (): Promise<BytemdPlugin> => {
         mermaid
           .render(id, aligned)
           .then(({ svg, bindFunctions }) => {
+            if (epoch !== renderEpoch) return
             container.innerHTML = svg
             bindFunctions?.(container)
           })
           .catch((error: unknown) => {
+            if (epoch !== renderEpoch) return
             const message = error instanceof Error ? error.message : String(error)
             renderError(container, message)
             console.error('Mermaid 渲染失败:', error)
           })
+          .finally(() => {
+            if (epoch !== renderEpoch) return
+            pending -= 1
+            if (pending > 0) return
+            // 图表撑开高度后，让切标签时的滚动还原有机会再对齐一次
+            markdownBody.dispatchEvent(new CustomEvent('markfly-mermaid-done', { bubbles: true }))
+          })
       })
+
+      return () => {
+        if (renderEpoch === epoch) renderEpoch += 1
+      }
     },
   }
 }

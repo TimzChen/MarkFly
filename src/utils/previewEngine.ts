@@ -1,6 +1,7 @@
 import type { BytemdPlugin } from 'bytemd'
 import { createHeadingSlugPlugin } from './headingSlugPlugin'
 import { needsFullPreview } from './markdownPreview'
+import { createHeadingFoldPlugin } from './previewHeadingFold'
 import { createLocalFileLinksPlugin } from './previewLinkConfig'
 
 /** GFM 预览共用插件：本地链接 + 标题锚点（与 VS Code / GitHub 目录跳转对齐） */
@@ -12,6 +13,7 @@ export const createCorePreviewPlugins = (
   highlightPlugin,
   createLocalFileLinksPlugin(),
   createHeadingSlugPlugin(),
+  createHeadingFoldPlugin(),
 ]
 
 export type MediumPreviewModules = {

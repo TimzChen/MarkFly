@@ -9,17 +9,36 @@
     <nav class="toc-content" aria-label="文档目录">
       <div v-if="headings.length === 0" class="toc-empty">暂无标题</div>
       <button
-        v-for="(heading, index) in headings"
-        :key="`${index}-${heading.text}`"
+        v-for="heading in visibleTocItems"
+        :key="`${heading.index}-${heading.text}`"
         type="button"
         class="toc-item"
         :class="{
-          'is-active': index === activeIndex,
+          'is-active': heading.index === displayActiveIndex,
           'is-first': heading.level === minLevel,
         }"
-        :style="{ paddingLeft: `${(heading.level - minLevel) * 16 + 8}px` }"
-        @click="scrollToHeading(index)"
+        :style="{ paddingLeft: `${(heading.level - minLevel) * 12 + 4}px` }"
+        @click="scrollToHeading(heading.index)"
       >
+        <span
+          class="toc-twist"
+          :class="{
+            'is-leaf': !heading.hasChildren,
+            'is-open': heading.hasChildren && !collapsedHeadings[heading.index],
+          }"
+          :aria-hidden="!heading.hasChildren"
+          @click="onTocTwistClick($event, heading)"
+        >
+          <svg
+            v-if="heading.hasChildren"
+            width="10"
+            height="10"
+            viewBox="0 0 16 16"
+            fill="none"
+          >
+            <path d="M6 3.5 12 8 6 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
         <span class="toc-text">{{ heading.text }}</span>
       </button>
     </nav>
@@ -28,6 +47,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+import { expandFoldsForElement, isHeadingFoldedAway } from '../utils/previewHeadingFold'
 
 type Heading = {
   text: string
@@ -86,12 +106,72 @@ const extractHeadings = (markdown: string): Heading[] => {
   return matches
 }
 
+type TocItem = Heading & {
+  index: number
+  hasChildren: boolean
+}
+
 const headings = computed(() => extractHeadings(props.content))
 const minLevel = computed(() => {
   if (headings.value.length === 0) return 1
   return Math.min(...headings.value.map((item) => item.level))
 })
 const activeIndex = ref(0)
+const collapsedHeadings = ref<Record<number, boolean>>({})
+
+const tocItems = computed<TocItem[]>(() => {
+  const list = headings.value
+  return list.map((heading, index) => ({
+    ...heading,
+    index,
+    hasChildren: !!list[index + 1] && list[index + 1].level > heading.level,
+  }))
+})
+
+const parentIndexOf = (index: number) => {
+  const list = headings.value
+  const level = list[index]?.level
+  if (!level) return -1
+  for (let i = index - 1; i >= 0; i -= 1) {
+    if (list[i].level < level) return i
+  }
+  return -1
+}
+
+const isHeadingCollapsedAway = (index: number) => {
+  let parent = parentIndexOf(index)
+  while (parent >= 0) {
+    if (collapsedHeadings.value[parent]) return true
+    parent = parentIndexOf(parent)
+  }
+  return false
+}
+
+const visibleTocItems = computed(() =>
+  tocItems.value.filter((item) => !isHeadingCollapsedAway(item.index))
+)
+
+const displayActiveIndex = computed(() => {
+  let index = activeIndex.value
+  while (index >= 0 && isHeadingCollapsedAway(index)) {
+    index = parentIndexOf(index)
+  }
+  return index
+})
+
+const toggleHeading = (index: number) => {
+  collapsedHeadings.value = {
+    ...collapsedHeadings.value,
+    [index]: !collapsedHeadings.value[index],
+  }
+}
+
+const onTocTwistClick = (event: MouseEvent, heading: TocItem) => {
+  if (!heading.hasChildren) return
+  event.stopPropagation()
+  event.preventDefault()
+  toggleHeading(heading.index)
+}
 
 const resolveScrollRoot = (): HTMLElement | null => {
   const root = props.scrollRoot
@@ -115,6 +195,7 @@ const updateActiveFromScroll = () => {
   const rootTop = root.getBoundingClientRect().top
   let current = 0
   for (let index = 0; index < nodes.length; index += 1) {
+    if (isHeadingFoldedAway(nodes[index])) continue
     if (nodes[index].getBoundingClientRect().top - rootTop <= 12) current = index
     else break
   }
@@ -126,6 +207,7 @@ const scrollToHeading = (index: number) => {
   if (!root) return
   const target = headingNodes(root)[index]
   if (!target) return
+  expandFoldsForElement(target)
   activeIndex.value = index
   const nextTop = headingOffsetInRoot(root, target)
   const maxScroll = Math.max(0, root.scrollHeight - root.clientHeight)
@@ -161,9 +243,17 @@ const bindScroll = () => {
 }
 
 watch(
+  () => props.syncKey,
+  () => {
+    collapsedHeadings.value = {}
+  }
+)
+
+watch(
   () => [props.content, props.collapsed, props.syncKey] as const,
   async () => {
     retryCount = 0
+    activeIndex.value = 0
     if (props.collapsed) {
       unbindScroll()
       return
@@ -245,7 +335,9 @@ onUnmounted(unbindScroll)
 }
 
 .toc-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   width: 100%;
   border: none;
   background: transparent;
@@ -259,6 +351,41 @@ onUnmounted(unbindScroll)
   line-height: 2;
   color: var(--text-secondary);
   border-radius: 4px;
+}
+
+.toc-twist {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  border-radius: 3px;
+}
+
+.toc-twist:not(.is-leaf) {
+  cursor: pointer;
+}
+
+.toc-twist:not(.is-leaf):hover {
+  color: var(--accent-color);
+  background: var(--hover-bg);
+}
+
+.toc-twist svg {
+  display: block;
+  transform: rotate(0deg);
+  transition: transform 0.15s ease;
+}
+
+.toc-twist.is-open svg {
+  transform: rotate(90deg);
+}
+
+.toc-twist.is-leaf {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .toc-item:hover {
@@ -276,6 +403,8 @@ onUnmounted(unbindScroll)
 }
 
 .toc-text {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

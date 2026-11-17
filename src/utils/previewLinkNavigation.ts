@@ -1,4 +1,5 @@
 import { resolveMarkdownAssetPath } from './previewAssets'
+import { expandFoldsForElement } from './previewHeadingFold'
 import {
   fromMarkflyFileHref,
   isExternalLinkUrl,
@@ -99,6 +100,7 @@ export function scrollPreviewToAnchor(
 ): boolean {
   const target = findAnchorTarget(previewRoot, hash)
   if (!target) return false
+  expandFoldsForElement(target)
 
   const scrollRoot =
     (previewRoot.closest('.markfly-preview-viewer, .bytemd-preview') as HTMLElement | null) ??

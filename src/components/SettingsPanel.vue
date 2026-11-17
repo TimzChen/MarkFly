@@ -60,6 +60,10 @@
               <span>切换主题</span>
               <kbd>Ctrl/Cmd + T</kbd>
             </div>
+            <div class="shortcut-item">
+              <span>刷新目录 / 当前文件</span>
+              <kbd>F5</kbd>
+            </div>
           </div>
         </div>
       </div>

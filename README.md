@@ -8,28 +8,34 @@
 
 ## 📦 最新版本发布
 
-### MarkFly v0.1.7 (2026-11-16)
+### MarkFly v0.1.8 (2026-11-17)
 
-[v0.1.7 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.7) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
+[v0.1.8 Release 页面](https://github.com/TimzChen/MarkFly/releases/tag/v0.1.8) · [全部版本](https://github.com/TimzChen/MarkFly/releases)
 
 #### 下载安装包
 
 - **Windows**
-  - [MarkFly_0.1.7_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.7/MarkFly_0.1.7_x64-setup.exe)
+  - [MarkFly_0.1.8_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.8/MarkFly_0.1.8_x64-setup.exe)
 
 > macOS / Linux 安装包可通过 [GitHub Actions 手动发版](https://github.com/TimzChen/MarkFly/actions/workflows/manual-release.yml) 构建，或参考下方「构建应用」在本地打包。
 
-#### v0.1.7 更新内容
+#### v0.1.8 更新内容
 
-- **知识库三栏**：已打开 / 最近打开 / 目录；打开的文件夹只在本次会话有效
-- **目录在左、知识库在右**：均可拖宽、折叠，样式对齐
-- **窗口全屏**：`F11` 进入全屏，同时收起原生菜单和知识库
-- **布局由顶栏接管**：分屏 / 仅编辑 / 仅预览，去掉 ByteMD 右侧重复按钮
-- **主题默认跟随系统**：状态栏或 `Ctrl+T` 只在浅色和深色之间切换
-- **新建不落盘**：未保存的新文件只在内存里，保存才写入磁盘
-- **Mermaid 对齐 Cursor**：流程图方向与 subgraph 顺序不再和预览里看到的反着来
+- **目录含子文件夹**：知识库「目录」会列出嵌套的 Markdown / 文本，树可折叠，并支持刷新（按钮 / 右键 / `F5`）
+- **正文按标题折叠**：预览里可以收起某一节；侧栏目录也可以折叠
+- **切标签记住位置**：回到文档时恢复原来的滚动和光标，打开 `文件.md#标题` 仍会跳到对应章节
+- **Mermaid 改用 ELK**：流程图嵌套布局更接近 Cursor
+- **刷新有反馈**：点刷新图标会转动，列表没变化也能看出点中了
 
 #### 历史版本
+
+<details>
+<summary>MarkFly v0.1.7 (2026-11-16)</summary>
+
+- **Windows**: [MarkFly_0.1.7_x64-setup.exe](https://github.com/TimzChen/MarkFly/releases/download/v0.1.7/MarkFly_0.1.7_x64-setup.exe)
+- 知识库三栏、目录左置、窗口全屏、主题默认跟随系统、新建不落盘
+
+</details>
 
 <details>
 <summary>MarkFly v0.1.6 (2026-08-07)</summary>
@@ -231,7 +237,7 @@ Windows 本地发版（NSIS 安装包）：
 
 ```powershell
 .\scripts\build-release.ps1
-# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.7_x64-setup.exe
+# 输出: src-tauri\target\release\bundle\nsis\MarkFly_0.1.8_x64-setup.exe
 ```
 
 ## 📖 使用指南
@@ -245,6 +251,7 @@ Windows 本地发版（NSIS 安装包）：
 | `Ctrl/Cmd + S` | 保存文件 |
 | `Ctrl/Cmd + B` | 显示 / 隐藏知识库 |
 | `Ctrl/Cmd + T` | 浅色 / 深色切换 |
+| `F5` | 刷新目录 / 从磁盘重读当前文件 |
 | `F11` | 窗口全屏 |
 
 预览布局、打开目录等可通过**文件 / 视图菜单**或顶栏按钮操作。
