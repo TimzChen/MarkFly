@@ -46,11 +46,12 @@ const applyMermaidConfig = (mermaid: MermaidApi) => {
     themeVariables: dark ? DARK_THEME_VARS : LIGHT_THEME_VARS,
     flowchart: {
       htmlLabels: true,
-      useMaxWidth: true,
+      useMaxWidth: false,
       defaultRenderer: 'elk',
-      padding: 12,
-      nodeSpacing: 40,
-      rankSpacing: 50,
+      padding: 16,
+      nodeSpacing: 60,
+      rankSpacing: 80,
+      wrappingWidth: 240,
       curve: 'basis',
     },
   })
@@ -64,7 +65,8 @@ const renderError = (container: HTMLElement, message: string) => {
 }
 
 /**
- * 自管 Mermaid 渲染：flowchart 走 ELK（与 Cursor 同引擎），配色走 base + 主题变量。
+ * 自管 Mermaid 渲染：flowchart 走 ELK（与 Cursor 同引擎，避免 dagre 嵌套 subgraph 挤叠/反序），
+ * 按内容固有尺寸绘制，超出预览栏再横滑。配色走 base + 主题变量。
  * 工具栏「插入图表」仍复用 @bytemd/plugin-mermaid 的 actions。
  */
 export const createMermaidPlugin = async (): Promise<BytemdPlugin> => {

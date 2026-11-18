@@ -24,6 +24,9 @@ if (Test-Path $vswhere) {
   }
 }
 
+# VsDevShell can prepend a huge PATH and bury node/npm; keep them first.
+$env:Path = "$nodeBin;$cargoBin;$nodejsBin;$env:Path"
+
 npx tauri build --bundles nsis --features custom-protocol
 
 Write-Host ""

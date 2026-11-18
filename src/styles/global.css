@@ -491,8 +491,10 @@ html, body {
 
 .markfly-mermaid svg,
 .bytemd-mermaid svg {
-  max-width: 100%;
+  max-width: none !important;
+  width: auto;
   height: auto;
+  display: block;
 }
 
 .markfly-mermaid .node rect,
