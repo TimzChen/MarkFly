@@ -43,6 +43,7 @@
   --table-stripe-bg: #f9fafb;
   --table-header-bg: #f5f6f8;
   --table-border: #e9edf1;
+  --table-cell-max-width: 36rem;
 
   --mermaid-node-bg: #ffffff;
   --mermaid-node-border: #c8c8c8;
@@ -364,7 +365,10 @@ html, body {
 .markfly-preview-viewer.markdown-body table td {
   border-color: var(--table-border) !important;
   padding: 8px 12px !important;
-  white-space: nowrap;
+  white-space: normal !important;
+  max-width: var(--table-cell-max-width);
+  overflow-wrap: break-word;
+  vertical-align: top;
 }
 
 .bytemd-preview .markdown-body table th,
